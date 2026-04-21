@@ -1,7 +1,7 @@
 plugins {
     kotlin("jvm")
     `java-gradle-plugin`
-    `maven-publish`
+    id("com.vanniktech.maven.publish")
 }
 
 dependencies {
@@ -13,9 +13,16 @@ gradlePlugin {
     plugins {
         create("protovalidate") {
             id = "dev.bmcreations.protovalidate"
+            displayName = "protovalidate-kt"
+            description = "Kotlin code generation for buf.validate and PGV protobuf constraints"
             implementationClass = "dev.bmcreations.protovalidate.gradle.ProtovalidatePlugin"
         }
     }
+}
+
+mavenPublishing {
+    publishToMavenCentral()
+    signAllPublications()
 }
 
 // Bake the project version into a resource so the plugin can resolve

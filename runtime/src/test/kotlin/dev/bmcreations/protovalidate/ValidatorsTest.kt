@@ -446,8 +446,8 @@ class ValidatorsTest {
     }
 
     @Test
-    fun `string uri ref - invalid empty string`() {
-        assertNotNull(Validators.checkStringUriRef("", "value"))
+    fun `string uri ref - empty string is valid path-empty`() {
+        assertNull(Validators.checkStringUriRef("", "value"))
     }
 
     // ── String Address ──

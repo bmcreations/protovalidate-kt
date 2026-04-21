@@ -7,6 +7,7 @@ pluginManagement {
     plugins {
         kotlin("jvm") version "2.3.20"
         id("com.google.protobuf") version "0.9.6"
+        id("com.vanniktech.maven.publish") version "0.36.0"
     }
 }
 
