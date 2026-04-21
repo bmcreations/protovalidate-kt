@@ -6,3 +6,4 @@ dependencies {
     implementation(kotlin("stdlib"))
     implementation(libs.protobuf.java)
 }
+
