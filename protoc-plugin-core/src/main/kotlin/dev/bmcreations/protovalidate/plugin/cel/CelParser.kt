@@ -19,6 +19,36 @@ sealed class CelExpr {
 class CelParseException(message: String) : RuntimeException(message)
 class CelRuntimeException(message: String) : RuntimeException(message)
 
+object CelBuiltins {
+    val COMPREHENSION_FUNCTIONS = setOf("all", "exists", "map", "filter", "exists_one")
+    const val FN_LIST = "__list__"
+    const val FN_FORMAT = "format"
+    const val FN_SIZE = "size"
+    const val FN_INT = "int"
+    const val FN_UINT = "uint"
+    const val FN_DOUBLE = "double"
+    const val FN_STRING = "string"
+    const val FN_BOOL = "bool"
+    const val FN_MATCHES = "matches"
+    const val FN_STARTS_WITH = "startsWith"
+    const val FN_ENDS_WITH = "endsWith"
+    const val FN_CONTAINS = "contains"
+    const val FN_DURATION = "duration"
+    const val FN_TIMESTAMP = "timestamp"
+    const val FN_EXISTS = "exists"
+    const val FN_ALL = "all"
+    const val FN_HAS = "has"
+    const val FN_DYN = "dyn"
+    const val FN_TYPE = "type"
+    const val FN_IS_HOSTNAME = "isHostname"
+    const val FN_IS_EMAIL = "isEmail"
+    const val FN_IS_URI = "isUri"
+    const val FN_IS_URI_REF = "isUriRef"
+    const val FN_IS_IP = "isIp"
+    const val FN_IS_IP_PREFIX = "isIpPrefix"
+    const val FN_IS_HOST_AND_PORT = "isHostAndPort"
+}
+
 /**
  * Recursive-descent parser for the CEL subset used in buf validate constraints.
  * Produces a [CelExpr] AST from a CEL expression string.
@@ -171,7 +201,7 @@ class CelParser(private val source: String) {
                         advance() // consume '('
                         skipWhitespace()
                         // Check for comprehension-style calls: all(v, body), exists(v, body), map(v, body)
-                        if (name in setOf("all", "exists", "map", "filter", "exists_one")) {
+                        if (name in CelBuiltins.COMPREHENSION_FUNCTIONS) {
                             val result = parseComprehensionArgs(name, expr)
                             expect(')')
                             expr = result
@@ -234,7 +264,7 @@ class CelParser(private val source: String) {
                 }
             }
             expect(']')
-            return CelExpr.Call("__list__", null, elements)
+            return CelExpr.Call(CelBuiltins.FN_LIST, null, elements)
         }
 
         // Numeric literal
@@ -258,7 +288,7 @@ class CelParser(private val source: String) {
                 advance()
                 skipWhitespace()
                 // Check for comprehension-style calls used as global functions (unusual but possible)
-                if (ident in setOf("all", "exists", "map", "filter", "exists_one")) {
+                if (ident in CelBuiltins.COMPREHENSION_FUNCTIONS) {
                     val result = parseComprehensionArgs(ident, null)
                     expect(')')
                     return result

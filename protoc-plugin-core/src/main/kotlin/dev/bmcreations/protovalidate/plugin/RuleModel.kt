@@ -15,6 +15,8 @@ enum class IgnoreMode {
     ALWAYS,
 }
 
+enum class FileSyntax { PROTO2, PROTO3, EDITIONS }
+
 enum class RuleType {
     STRING, BYTES,
     INT32, INT64, UINT32, UINT64, SINT32, SINT64,
@@ -24,6 +26,29 @@ enum class RuleType {
     REPEATED, MAP,
     DURATION, TIMESTAMP, ANY, FIELD_MASK,
     NONE
+}
+
+val RuleType.rulePrefix: String get() = name.lowercase()
+
+object WellKnownTypes {
+    const val DURATION   = ".google.protobuf.Duration"
+    const val TIMESTAMP  = ".google.protobuf.Timestamp"
+    const val ANY        = ".google.protobuf.Any"
+    const val FIELD_MASK = ".google.protobuf.FieldMask"
+
+    val WRAPPER_TO_RULE_TYPE: Map<String, RuleType> = mapOf(
+        ".google.protobuf.DoubleValue" to RuleType.DOUBLE,
+        ".google.protobuf.FloatValue" to RuleType.FLOAT,
+        ".google.protobuf.Int64Value" to RuleType.INT64,
+        ".google.protobuf.UInt64Value" to RuleType.UINT64,
+        ".google.protobuf.Int32Value" to RuleType.INT32,
+        ".google.protobuf.UInt32Value" to RuleType.UINT32,
+        ".google.protobuf.BoolValue" to RuleType.BOOL,
+        ".google.protobuf.StringValue" to RuleType.STRING,
+        ".google.protobuf.BytesValue" to RuleType.BYTES,
+    )
+
+    val WRAPPER_SUFFIXES: Set<String> = WRAPPER_TO_RULE_TYPE.keys
 }
 
 data class FieldRuleSet(
@@ -146,7 +171,6 @@ enum class BytesWellKnown {
 // Values are stored as pre-formatted Kotlin literal strings (e.g. "42L", "3.14f").
 // Raw Double values are stored alongside for exclusive-range detection at codegen time.
 data class NumericRuleSet(
-    val rulePrefix: String,         // "int32", "uint64", "float", etc.
     val constVal: String? = null,
     val ltVal: String? = null,
     val lteVal: String? = null,

@@ -100,7 +100,7 @@ object CelTranspiler {
                 thenStr != null || elseStr != null
             }
             is CelExpr.Literal -> expr.value is String
-            is CelExpr.Call -> expr.function == "format"
+            is CelExpr.Call -> expr.function == CelBuiltins.FN_FORMAT
             else -> false
         }
     }
@@ -213,7 +213,7 @@ object CelTranspiler {
         }
         // If this side is a uint() or int() cast and the other side is a map index access
         // with a 32-bit value type, downcast from toLong() to toInt()
-        if (thisExpr is CelExpr.Call && thisExpr.function in listOf("uint", "int") && otherExpr is CelExpr.IndexAccess) {
+        if (thisExpr is CelExpr.Call && thisExpr.function in listOf(CelBuiltins.FN_UINT, CelBuiltins.FN_INT) && otherExpr is CelExpr.IndexAccess) {
             if (ctx.mapValueType in listOf(CelFieldType.INT32, CelFieldType.UINT32, CelFieldType.SINT32,
                     CelFieldType.FIXED32, CelFieldType.SFIXED32)) {
                 // Replace .toLong() with .toInt() in the emitted string
@@ -226,7 +226,7 @@ object CelTranspiler {
                 return "$emitted.number"
             }
             // Also handle uint()/int() calls on the other side
-            if (otherExpr is CelExpr.Call && otherExpr.function in listOf("uint", "int")) {
+            if (otherExpr is CelExpr.Call && otherExpr.function in listOf(CelBuiltins.FN_UINT, CelBuiltins.FN_INT)) {
                 return "$emitted.number"
             }
         }
@@ -308,15 +308,15 @@ object CelTranspiler {
 
         return when (expr.function) {
             // List literal: [a, b, c] → listOf(a, b, c)
-            "__list__" -> "listOf(${args.joinToString(", ")})"
+            CelBuiltins.FN_LIST -> "listOf(${args.joinToString(", ")})"
 
             // String format: 'pattern'.format([args]) → String.format(pattern, *args)
-            "format" -> {
+            CelBuiltins.FN_FORMAT -> {
                 val fmtStr = receiver ?: "\"\""
                 // The args to format are typically a single list literal [a, b, c]
                 // Extract elements from the list for varargs
                 val formatArgs = if (expr.args.size == 1 && expr.args[0] is CelExpr.Call &&
-                    (expr.args[0] as CelExpr.Call).function == "__list__") {
+                    (expr.args[0] as CelExpr.Call).function == CelBuiltins.FN_LIST) {
                     (expr.args[0] as CelExpr.Call).args.map { emitExpr(it, ctx) }
                 } else {
                     args
@@ -325,30 +325,30 @@ object CelTranspiler {
             }
 
             // Type casts
-            "int" -> {
+            CelBuiltins.FN_INT -> {
                 val arg = args.firstOrNull() ?: receiver ?: "0"
                 emitIntCast(arg, expr.args.firstOrNull() ?: expr.receiver, ctx)
             }
-            "uint" -> {
+            CelBuiltins.FN_UINT -> {
                 val arg = args.firstOrNull() ?: receiver ?: "0"
                 // uint() in CEL casts to unsigned - emit as Long for Kotlin compatibility
                 "($arg).toLong()"
             }
-            "double" -> {
+            CelBuiltins.FN_DOUBLE -> {
                 val arg = args.firstOrNull() ?: receiver ?: "0.0"
                 "($arg).toDouble()"
             }
-            "string" -> {
+            CelBuiltins.FN_STRING -> {
                 val arg = args.firstOrNull() ?: receiver ?: "\"\""
                 emitStringCast(arg, expr.args.firstOrNull() ?: expr.receiver, ctx)
             }
-            "bool" -> {
+            CelBuiltins.FN_BOOL -> {
                 val arg = args.firstOrNull() ?: receiver ?: "false"
                 arg
             }
 
             // Size
-            "size" -> {
+            CelBuiltins.FN_SIZE -> {
                 if (receiver != null) {
                     emitSize(receiver, expr.receiver, ctx)
                 } else {
@@ -358,49 +358,42 @@ object CelTranspiler {
             }
 
             // String operations
-            "matches" -> {
+            CelBuiltins.FN_MATCHES -> {
                 val pattern = args.firstOrNull() ?: "\"\""
                 "Regex($pattern).containsMatchIn($receiver)"
             }
-            "startsWith" -> "$receiver.startsWith(${args.first()})"
-            "endsWith" -> "$receiver.endsWith(${args.first()})"
-            "contains" -> "$receiver.contains(${args.first()})"
-
-            // Format
-            "format" -> {
-                // 'fmt'.format([args]) → String.format(fmt, *args)
-                val fmtArgs = args.firstOrNull() ?: "emptyList()"
-                "$receiver.format($fmtArgs)"
-            }
+            CelBuiltins.FN_STARTS_WITH -> "$receiver.startsWith(${args.first()})"
+            CelBuiltins.FN_ENDS_WITH -> "$receiver.endsWith(${args.first()})"
+            CelBuiltins.FN_CONTAINS -> "$receiver.contains(${args.first()})"
 
             // Duration
-            "duration" -> {
+            CelBuiltins.FN_DURATION -> {
                 val arg = args.firstOrNull() ?: "\"0s\""
                 emitDurationLiteral(arg)
             }
 
             // Timestamp
-            "timestamp" -> {
+            CelBuiltins.FN_TIMESTAMP -> {
                 val arg = args.firstOrNull() ?: "\"0\""
                 arg // simplified
             }
 
             // Collection: exists, all handled via Comprehension node mostly,
             // but in case they appear as Call nodes:
-            "exists" -> "$receiver.any { ${args.joinToString()} }"
-            "all" -> "$receiver.all { ${args.joinToString()} }"
+            CelBuiltins.FN_EXISTS -> "$receiver.any { ${args.joinToString()} }"
+            CelBuiltins.FN_ALL -> "$receiver.all { ${args.joinToString()} }"
 
             // Library validation functions → delegate to runtime StringValidators
-            "isHostname" -> "(dev.bmcreations.protovalidate.StringValidators.checkHostname($receiver, \"\") == null)"
-            "isEmail" -> "(dev.bmcreations.protovalidate.StringValidators.checkEmail($receiver, \"\") == null)"
-            "isUri" -> "(dev.bmcreations.protovalidate.StringValidators.checkUri($receiver, \"\") == null)"
-            "isUriRef" -> "(dev.bmcreations.protovalidate.StringValidators.checkUriRef($receiver, \"\") == null)"
-            "isIp" -> if (args.isEmpty()) {
+            CelBuiltins.FN_IS_HOSTNAME -> "(dev.bmcreations.protovalidate.StringValidators.checkHostname($receiver, \"\") == null)"
+            CelBuiltins.FN_IS_EMAIL -> "(dev.bmcreations.protovalidate.StringValidators.checkEmail($receiver, \"\") == null)"
+            CelBuiltins.FN_IS_URI -> "(dev.bmcreations.protovalidate.StringValidators.checkUri($receiver, \"\") == null)"
+            CelBuiltins.FN_IS_URI_REF -> "(dev.bmcreations.protovalidate.StringValidators.checkUriRef($receiver, \"\") == null)"
+            CelBuiltins.FN_IS_IP -> if (args.isEmpty()) {
                 "(dev.bmcreations.protovalidate.StringValidators.isValidIpLibrary($receiver, 0))"
             } else {
                 "(dev.bmcreations.protovalidate.StringValidators.isValidIpLibrary($receiver, ${args[0]}))"
             }
-            "isIpPrefix" -> if (args.isEmpty()) {
+            CelBuiltins.FN_IS_IP_PREFIX -> if (args.isEmpty()) {
                 "(dev.bmcreations.protovalidate.StringValidators.checkIpPrefix($receiver, \"\") == null)"
             } else if (args.size == 1) {
                 // Determine if the single arg is version (Int) or strict (Boolean) based on the AST
@@ -415,14 +408,14 @@ object CelTranspiler {
             } else {
                 "(dev.bmcreations.protovalidate.StringValidators.checkIpPrefix($receiver, \"\", ${args[0]}, ${args[1]}) == null)"
             }
-            "isHostAndPort" -> if (args.isEmpty()) {
+            CelBuiltins.FN_IS_HOST_AND_PORT -> if (args.isEmpty()) {
                 "(dev.bmcreations.protovalidate.StringValidators.checkHostAndPort($receiver, \"\") == null)"
             } else {
                 "(dev.bmcreations.protovalidate.StringValidators.checkHostAndPort($receiver, \"\", ${args[0]}) == null)"
             }
 
             // has(expr.field) → expr.hasField() — checks protobuf field presence
-            "has" -> {
+            CelBuiltins.FN_HAS -> {
                 val arg = expr.args.firstOrNull()
                 if (arg is CelExpr.FieldAccess) {
                     val recv = emitExpr(arg.receiver, ctx)
@@ -438,10 +431,10 @@ object CelTranspiler {
             }
 
             // dyn() → runtime type access that we can't resolve statically
-            "dyn" -> throw CelRuntimeException("dynamic type field access results in runtime type error")
+            CelBuiltins.FN_DYN -> throw CelRuntimeException("dynamic type field access results in runtime type error")
 
             // Known unsupported functions → throw to signal CompilationError
-            "type" ->
+            CelBuiltins.FN_TYPE ->
                 throw CelParseException("unsupported CEL function: ${expr.function}")
 
             // Generic method call — fallback for any other function
@@ -567,11 +560,11 @@ object CelTranspiler {
                 else -> v.toString()
             }
             is CelExpr.Call -> {
-                if (expr.function == "format") {
+                if (expr.function == CelBuiltins.FN_FORMAT) {
                     // 'fmt'.format([args]) → String.format(fmt, arg1, arg2, ...)
                     val fmtStr = expr.receiver?.let { emitExpr(it, ctx) } ?: "\"\""
                     val formatArgs = if (expr.args.size == 1 && expr.args[0] is CelExpr.Call &&
-                        (expr.args[0] as CelExpr.Call).function == "__list__") {
+                        (expr.args[0] as CelExpr.Call).function == CelBuiltins.FN_LIST) {
                         (expr.args[0] as CelExpr.Call).args.map { emitExpr(it, ctx) }
                     } else {
                         expr.args.map { emitExpr(it, ctx) }
@@ -634,7 +627,7 @@ object CelTranspiler {
     private fun isDurationExpr(expr: CelExpr, ctx: CelContext): Boolean = when (expr) {
         is CelExpr.This -> ctx.fieldType == CelFieldType.DURATION
         is CelExpr.Ident -> expr.name == "rule" || expr.name == "now"
-        is CelExpr.Call -> expr.function == "duration"
+        is CelExpr.Call -> expr.function == CelBuiltins.FN_DURATION
         is CelExpr.Unary -> isDurationExpr(expr.operand, ctx)
         else -> false
     }

@@ -10,8 +10,7 @@ data class EmitContext(
     val indent: String = "    ",
     val validatedTypes: Map<String, String> = emptyMap(),
     val neededImports: MutableSet<String> = mutableSetOf(),
-    /** File syntax: "proto2", "proto3", or "editions" */
-    val fileSyntax: String = "proto3",
+    val fileSyntax: FileSyntax = FileSyntax.PROTO3,
     /** All nested types in the current message (for resolving map entry value types) */
     val nestedTypes: List<com.google.protobuf.DescriptorProtos.DescriptorProto> = emptyList(),
 )
@@ -87,7 +86,7 @@ object FieldEmitter {
         val skipRequired = ruleSet.message?.requiredOnlyExplicit == true &&
             fieldProto.proto3Optional &&
             fieldProto.type == Type.TYPE_MESSAGE &&
-            effectiveCtx.fileSyntax == "proto3"
+            effectiveCtx.fileSyntax == FileSyntax.PROTO3
 
         if (ruleSet.message?.required == true && !skipRequired) {
             if (fieldProto.label == Label.LABEL_REPEATED) {
@@ -238,7 +237,7 @@ object FieldEmitter {
             RuleType.SFIXED32, RuleType.SFIXED64, RuleType.FLOAT, RuleType.DOUBLE ->
                 ruleSet.numeric?.let {
                     val rules = if (suppressInnerIgnore) it.copy(ignore = IgnoreMode.UNSPECIFIED) else it
-                    emitNumericRules(rules, effectiveAccessor, quotedField, wktCtx ?: innerCtx)
+                    emitNumericRules(rules, effectiveAccessor, quotedField, wktCtx ?: innerCtx, ruleSet.type)
                 }
             RuleType.BOOL -> ruleSet.bool?.let { emitBoolRules(it, effectiveAccessor, quotedField, wktCtx ?: innerCtx) }
             RuleType.ENUM -> ruleSet.enum?.let { emitEnumRules(it, effectiveAccessor, quotedField, wktCtx ?: innerCtx) }
@@ -290,7 +289,7 @@ object FieldEmitter {
             RuleType.INT32, RuleType.INT64, RuleType.UINT32, RuleType.UINT64,
             RuleType.SINT32, RuleType.SINT64, RuleType.FIXED32, RuleType.FIXED64,
             RuleType.SFIXED32, RuleType.SFIXED64, RuleType.FLOAT, RuleType.DOUBLE ->
-                ruleSet.numeric?.let { emitNumericRules(it, accessor, fieldExpr, ctx) }
+                ruleSet.numeric?.let { emitNumericRules(it, accessor, fieldExpr, ctx, ruleSet.type) }
             RuleType.BOOL -> ruleSet.bool?.let { emitBoolRules(it, accessor, fieldExpr, ctx) }
             RuleType.ENUM -> ruleSet.enum?.let { emitEnumRules(it, accessor, fieldExpr, ctx) }
             // Duration, Timestamp, and Any items are always present (they come from a repeated list),
@@ -538,7 +537,8 @@ object FieldEmitter {
 
     // ── Numeric (all int/float/double types) ──
 
-    private fun emitNumericRules(rules: NumericRuleSet, accessor: String, field: String, ctx: EmitContext) {
+    private fun emitNumericRules(rules: NumericRuleSet, accessor: String, field: String, ctx: EmitContext, ruleType: RuleType) {
+        val rulePrefix = ruleType.rulePrefix
         val indent = ctx.indent
         val hasIgnoreGuard = rules.ignore == IgnoreMode.IF_UNPOPULATED || rules.ignore == IgnoreMode.IF_DEFAULT_VALUE
         if (hasIgnoreGuard) {
@@ -547,11 +547,11 @@ object FieldEmitter {
         val i = if (hasIgnoreGuard) "$indent    " else indent
 
         rules.constVal?.let {
-            ctx.sb.appendLine("${i}Validators.checkConst($accessor, $it, $field, \"${rules.rulePrefix}.const\")?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkConst($accessor, $it, $field, \"${rulePrefix}.const\")?.let { violations += it }")
         }
 
         if (rules.finite) {
-            ctx.sb.appendLine("${i}Validators.checkFinite($accessor, $field, \"${rules.rulePrefix}.finite\")?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkFinite($accessor, $field, \"${rulePrefix}.finite\")?.let { violations += it }")
         }
 
         // When both lower (gt/gte) and upper (lt/lte) bounds are present, use combined range check
@@ -563,29 +563,29 @@ object FieldEmitter {
             val upperVal = rules.ltVal ?: rules.lteVal!!
             val lowerInclusive = rules.gtVal == null // gte = inclusive
             val upperInclusive = rules.ltVal == null // lte = inclusive
-            ctx.sb.appendLine("${i}Validators.checkRange($accessor, $lowerVal, $upperVal, $lowerInclusive, $upperInclusive, $field, \"${rules.rulePrefix}\")?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkRange($accessor, $lowerVal, $upperVal, $lowerInclusive, $upperInclusive, $field, \"${rulePrefix}\")?.let { violations += it }")
         } else {
             rules.ltVal?.let {
-                ctx.sb.appendLine("${i}Validators.checkLt($accessor, $it, $field, \"${rules.rulePrefix}.lt\")?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkLt($accessor, $it, $field, \"${rulePrefix}.lt\")?.let { violations += it }")
             }
             rules.lteVal?.let {
-                ctx.sb.appendLine("${i}Validators.checkLte($accessor, $it, $field, \"${rules.rulePrefix}.lte\")?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkLte($accessor, $it, $field, \"${rulePrefix}.lte\")?.let { violations += it }")
             }
             rules.gtVal?.let {
-                ctx.sb.appendLine("${i}Validators.checkGt($accessor, $it, $field, \"${rules.rulePrefix}.gt\")?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkGt($accessor, $it, $field, \"${rulePrefix}.gt\")?.let { violations += it }")
             }
             rules.gteVal?.let {
-                ctx.sb.appendLine("${i}Validators.checkGte($accessor, $it, $field, \"${rules.rulePrefix}.gte\")?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkGte($accessor, $it, $field, \"${rulePrefix}.gte\")?.let { violations += it }")
             }
         }
 
         if (rules.inList.isNotEmpty()) {
             val items = rules.inList.joinToString(", ")
-            ctx.sb.appendLine("${i}Validators.checkIn($accessor, listOf($items), $field, \"${rules.rulePrefix}.in\")?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkIn($accessor, listOf($items), $field, \"${rulePrefix}.in\")?.let { violations += it }")
         }
         if (rules.notInList.isNotEmpty()) {
             val items = rules.notInList.joinToString(", ")
-            ctx.sb.appendLine("${i}Validators.checkNotIn($accessor, listOf($items), $field, \"${rules.rulePrefix}.not_in\")?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkNotIn($accessor, listOf($items), $field, \"${rulePrefix}.not_in\")?.let { violations += it }")
         }
 
         if (hasIgnoreGuard) {
@@ -879,20 +879,8 @@ object FieldEmitter {
 
     // ── WKT wrapper helpers ──
 
-    private val WKT_WRAPPER_SUFFIXES = setOf(
-        ".google.protobuf.DoubleValue",
-        ".google.protobuf.FloatValue",
-        ".google.protobuf.Int64Value",
-        ".google.protobuf.UInt64Value",
-        ".google.protobuf.Int32Value",
-        ".google.protobuf.UInt32Value",
-        ".google.protobuf.BoolValue",
-        ".google.protobuf.StringValue",
-        ".google.protobuf.BytesValue",
-    )
-
     private fun isWktWrapperType(typeName: String): Boolean =
-        WKT_WRAPPER_SUFFIXES.any { typeName.endsWith(it) }
+        WellKnownTypes.WRAPPER_SUFFIXES.any { typeName.endsWith(it) }
 
     // ── Presence helpers ──
 
@@ -902,18 +890,18 @@ object FieldEmitter {
      * - Proto3: only `optional` fields (proto3Optional=true) and message-type fields
      * - Editions: check resolved features.field_presence; EXPLICIT and LEGACY_REQUIRED have presence
      */
-    private fun fieldHasPresence(field: FieldDescriptorProto, fileSyntax: String): Boolean {
+    private fun fieldHasPresence(field: FieldDescriptorProto, fileSyntax: FileSyntax): Boolean {
         // Message and enum types in proto2 always have presence; message fields always do in all syntaxes
         if (field.type == Type.TYPE_MESSAGE) return true
 
         return when (fileSyntax) {
-            "proto2" -> true // All singular proto2 fields have presence
-            "proto3" -> {
+            FileSyntax.PROTO2 -> true // All singular proto2 fields have presence
+            FileSyntax.PROTO3 -> {
                 // Proto3 fields only have presence if they're `optional` (proto3Optional flag)
                 // or if they're in a real oneof
                 field.proto3Optional || (field.hasOneofIndex() && !field.proto3Optional)
             }
-            "editions" -> {
+            FileSyntax.EDITIONS -> {
                 // Check resolved features on the field
                 if (field.options?.hasFeatures() == true) {
                     val presence = field.options.features.fieldPresence
@@ -924,7 +912,6 @@ object FieldEmitter {
                     true
                 }
             }
-            else -> true
         }
     }
 
@@ -1039,7 +1026,7 @@ object FieldEmitter {
                 if (accessor == "item" || accessor == "item.value" || accessor == "mapKey" || accessor == "mapValue") {
                     // Repeated/map enum items: use .number for CEL integer comparison
                     "$accessor.number"
-                } else if (ctx.fileSyntax == "proto2") {
+                } else if (ctx.fileSyntax == FileSyntax.PROTO2) {
                     // Proto2: no *Value getter, use .number on the enum accessor
                     "$accessor.number"
                 } else {

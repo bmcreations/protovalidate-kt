@@ -412,7 +412,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     // ── Numeric converters ──
 
     private fun convertInt32Rules(r: build.buf.validate.Int32Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "int32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -429,7 +429,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertInt64Rules(r: build.buf.validate.Int64Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "int64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -446,7 +446,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertUInt32Rules(r: build.buf.validate.UInt32Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "uint32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -463,7 +463,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertUInt64Rules(r: build.buf.validate.UInt64Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "uint64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -480,7 +480,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertSInt32Rules(r: build.buf.validate.SInt32Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "sint32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -497,7 +497,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertSInt64Rules(r: build.buf.validate.SInt64Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "sint64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -514,7 +514,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertFixed32Rules(r: build.buf.validate.Fixed32Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "fixed32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -531,7 +531,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertFixed64Rules(r: build.buf.validate.Fixed64Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "fixed64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -548,7 +548,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertSFixed32Rules(r: build.buf.validate.SFixed32Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "sfixed32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -565,7 +565,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertSFixed64Rules(r: build.buf.validate.SFixed64Rules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "sfixed64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -582,7 +582,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertFloatRules(r: build.buf.validate.FloatRules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "float",
+
         constVal = if (r.hasConst()) "${r.const}f" else null,
         ltVal = if (r.hasLt()) "${r.lt}f" else null,
         lteVal = if (r.hasLte()) "${r.lte}f" else null,
@@ -600,7 +600,7 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     )
 
     private fun convertDoubleRules(r: build.buf.validate.DoubleRules, ignoreMode: IgnoreMode) = NumericRuleSet(
-        rulePrefix = "double",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,

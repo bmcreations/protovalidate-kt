@@ -33,9 +33,9 @@ object CodeGenerator {
 
         // Determine file syntax for presence-checking decisions
         val fileSyntax = when {
-            fileProto.syntax == "editions" || fileProto.hasEdition() -> "editions"
-            fileProto.syntax == "proto2" || fileProto.syntax.isEmpty() -> "proto2"
-            else -> "proto3"
+            fileProto.syntax == "editions" || fileProto.hasEdition() -> FileSyntax.EDITIONS
+            fileProto.syntax == "proto2" || fileProto.syntax.isEmpty() -> FileSyntax.PROTO2
+            else -> FileSyntax.PROTO3
         }
 
         for (messageProto in fileProto.messageTypeList) {
@@ -64,7 +64,7 @@ object CodeGenerator {
         validatedTypes: Map<String, String>,
         extractor: RuleExtractor,
         results: MutableList<CodeGeneratorResponse.File>,
-        fileSyntax: String
+        fileSyntax: FileSyntax
     ) {
         // Check disabled / ignored
         if (messageProto.options != null) {
@@ -264,7 +264,7 @@ object CodeGenerator {
         messageOneofRules: List<MessageOneofRuleSet>,
         messageCelRules: List<MessageCelRule> = emptyList(),
         validatedTypes: Map<String, String>,
-        fileSyntax: String
+        fileSyntax: FileSyntax
     ): String {
         // Build the fully-qualified receiver type
         val receiverType = buildReceiverType(
@@ -554,7 +554,7 @@ object CodeGenerator {
         rule: MessageOneofRuleSet,
         ruleIndex: Int,
         fieldByName: Map<String, FieldDescriptorProto>,
-        fileSyntax: String,
+        fileSyntax: FileSyntax,
         sb: StringBuilder
     ) {
         val fieldNames = rule.fields
@@ -595,7 +595,7 @@ object CodeGenerator {
      * (i.e., not the zero/default value for implicit-presence fields, or has*() for
      * explicit-presence fields).
      */
-    private fun fieldSetExpression(field: FieldDescriptorProto, fileSyntax: String): String {
+    private fun fieldSetExpression(field: FieldDescriptorProto, fileSyntax: FileSyntax): String {
         val accessor = escapeIfKeyword(snakeToCamelLower(field.name))
         val rawAccessor = snakeToCamelLower(field.name).removeSurrounding("`")
 
@@ -610,9 +610,9 @@ object CodeGenerator {
 
         // For explicit-presence fields (proto2 all scalars, proto3 optional, editions explicit)
         val hasPresence = when (fileSyntax) {
-            "proto2" -> true
-            "proto3" -> field.proto3Optional || field.hasOneofIndex()
-            "editions" -> {
+            FileSyntax.PROTO2 -> true
+            FileSyntax.PROTO3 -> field.proto3Optional || field.hasOneofIndex()
+            FileSyntax.EDITIONS -> {
                 if (field.options?.hasFeatures() == true) {
                     val presence = field.options.features.fieldPresence
                     presence != com.google.protobuf.DescriptorProtos.FeatureSet.FieldPresence.IMPLICIT
@@ -620,7 +620,6 @@ object CodeGenerator {
                     true
                 }
             }
-            else -> true
         }
 
         if (hasPresence) {
@@ -652,7 +651,7 @@ object CodeGenerator {
     private fun emitWithImplicitIgnoreWrap(
         field: FieldDescriptorProto,
         rules: FieldRuleSet,
-        fileSyntax: String,
+        fileSyntax: FileSyntax,
         bodySb: StringBuilder,
         neededImports: MutableSet<String>,
         validatedTypes: Map<String, String>,
@@ -774,24 +773,13 @@ object CodeGenerator {
             Type.TYPE_MESSAGE -> {
                 val typeName = field.typeName
                 when (ruleType) {
-                    RuleType.DURATION -> typeName.endsWith(".google.protobuf.Duration")
-                    RuleType.TIMESTAMP -> typeName.endsWith(".google.protobuf.Timestamp")
-                    RuleType.ANY -> typeName.endsWith(".google.protobuf.Any")
-                    RuleType.FIELD_MASK -> typeName.endsWith(".google.protobuf.FieldMask")
+                    RuleType.DURATION -> typeName.endsWith(WellKnownTypes.DURATION)
+                    RuleType.TIMESTAMP -> typeName.endsWith(WellKnownTypes.TIMESTAMP)
+                    RuleType.ANY -> typeName.endsWith(WellKnownTypes.ANY)
+                    RuleType.FIELD_MASK -> typeName.endsWith(WellKnownTypes.FIELD_MASK)
                     else -> {
                         // Allow scalar rules on WKT wrapper types
-                        val wrapperMapping = mapOf(
-                            ".google.protobuf.DoubleValue" to RuleType.DOUBLE,
-                            ".google.protobuf.FloatValue" to RuleType.FLOAT,
-                            ".google.protobuf.Int64Value" to RuleType.INT64,
-                            ".google.protobuf.UInt64Value" to RuleType.UINT64,
-                            ".google.protobuf.Int32Value" to RuleType.INT32,
-                            ".google.protobuf.UInt32Value" to RuleType.UINT32,
-                            ".google.protobuf.BoolValue" to RuleType.BOOL,
-                            ".google.protobuf.StringValue" to RuleType.STRING,
-                            ".google.protobuf.BytesValue" to RuleType.BYTES,
-                        )
-                        wrapperMapping.entries.any { (suffix, expectedType) ->
+                        WellKnownTypes.WRAPPER_TO_RULE_TYPE.entries.any { (suffix, expectedType) ->
                             typeName.endsWith(suffix) && ruleType == expectedType
                         }
                     }

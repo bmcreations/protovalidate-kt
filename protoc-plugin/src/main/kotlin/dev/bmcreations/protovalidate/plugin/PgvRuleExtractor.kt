@@ -269,7 +269,7 @@ class PgvRuleExtractor : RuleExtractor {
     // ── Numeric converters ──
 
     private fun convertInt32Rules(r: Int32Rules) = NumericRuleSet(
-        rulePrefix = "int32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -286,7 +286,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertInt64Rules(r: Int64Rules) = NumericRuleSet(
-        rulePrefix = "int64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -303,7 +303,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertUInt32Rules(r: UInt32Rules) = NumericRuleSet(
-        rulePrefix = "uint32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -320,7 +320,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertUInt64Rules(r: UInt64Rules) = NumericRuleSet(
-        rulePrefix = "uint64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -337,7 +337,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertSInt32Rules(r: SInt32Rules) = NumericRuleSet(
-        rulePrefix = "sint32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -354,7 +354,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertSInt64Rules(r: SInt64Rules) = NumericRuleSet(
-        rulePrefix = "sint64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -371,7 +371,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertFixed32Rules(r: Fixed32Rules) = NumericRuleSet(
-        rulePrefix = "fixed32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -388,7 +388,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertFixed64Rules(r: Fixed64Rules) = NumericRuleSet(
-        rulePrefix = "fixed64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -405,7 +405,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertSFixed32Rules(r: SFixed32Rules) = NumericRuleSet(
-        rulePrefix = "sfixed32",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
@@ -422,7 +422,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertSFixed64Rules(r: SFixed64Rules) = NumericRuleSet(
-        rulePrefix = "sfixed64",
+
         constVal = if (r.hasConst()) "${r.const}L" else null,
         ltVal = if (r.hasLt()) "${r.lt}L" else null,
         lteVal = if (r.hasLte()) "${r.lte}L" else null,
@@ -439,7 +439,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertFloatRules(r: FloatRules) = NumericRuleSet(
-        rulePrefix = "float",
+
         constVal = if (r.hasConst()) "${r.const}f" else null,
         ltVal = if (r.hasLt()) "${r.lt}f" else null,
         lteVal = if (r.hasLte()) "${r.lte}f" else null,
@@ -456,7 +456,7 @@ class PgvRuleExtractor : RuleExtractor {
     )
 
     private fun convertDoubleRules(r: DoubleRules) = NumericRuleSet(
-        rulePrefix = "double",
+
         constVal = if (r.hasConst()) "${r.const}" else null,
         ltVal = if (r.hasLt()) "${r.lt}" else null,
         lteVal = if (r.hasLte()) "${r.lte}" else null,
