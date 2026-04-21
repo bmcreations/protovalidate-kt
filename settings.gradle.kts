@@ -25,6 +25,7 @@ include(
     ":protoc-plugin-core",
     ":protoc-plugin",
     ":protoc-plugin-buf",
+    ":gradle-plugin",
     ":conformance",
     ":pgv-conformance",
 )
