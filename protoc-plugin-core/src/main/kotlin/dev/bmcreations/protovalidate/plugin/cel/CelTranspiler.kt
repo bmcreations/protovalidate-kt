@@ -216,6 +216,11 @@ object CelTranspiler {
         if (thisExpr is CelExpr.Call && thisExpr.function in listOf(CelBuiltins.FN_UINT, CelBuiltins.FN_INT) && otherExpr is CelExpr.IndexAccess) {
             if (ctx.mapValueType in listOf(CelFieldType.INT32, CelFieldType.UINT32, CelFieldType.SINT32,
                     CelFieldType.FIXED32, CelFieldType.SFIXED32)) {
+                // If the inner argument is already an Int literal, drop the redundant conversion
+                val innerArg = thisExpr.args.firstOrNull() ?: thisExpr.receiver
+                if (innerArg is CelExpr.Literal && innerArg.value is Int) {
+                    return "(${innerArg.value})"
+                }
                 // Replace .toLong() with .toInt() in the emitted string
                 return emitted.replace(").toLong()", ").toInt()")
             }
@@ -245,9 +250,9 @@ object CelTranspiler {
                 CelFieldType.FIXED64, CelFieldType.SFIXED64
             )
             if (is64bit && (otherExpr is CelExpr.This || otherExpr is CelExpr.Binary)) {
-                val v = when (thisExpr.value) {
-                    is ULong -> (thisExpr.value as ULong).value
-                    else -> thisExpr.value
+                val v = when (val raw = thisExpr.value) {
+                    is ULong -> raw.value
+                    else -> raw
                 }
                 return "${v}.toLong()"
             }

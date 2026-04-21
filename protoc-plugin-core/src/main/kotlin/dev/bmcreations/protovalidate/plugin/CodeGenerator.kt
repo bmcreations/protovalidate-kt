@@ -696,7 +696,7 @@ object CodeGenerator {
             is CelExpr.Call -> {
                 val stringMethods = setOf("startsWith", "endsWith", "contains", "matches")
                 if (expr.function in stringMethods && expr.receiver is CelExpr.FieldAccess) {
-                    val fieldAccess = expr.receiver as CelExpr.FieldAccess
+                    val fieldAccess = expr.receiver
                     if (fieldAccess.receiver is CelExpr.This) {
                         val fieldType = fieldTypes[fieldAccess.field]
                         if (fieldType != null && fieldType != Type.TYPE_STRING) {

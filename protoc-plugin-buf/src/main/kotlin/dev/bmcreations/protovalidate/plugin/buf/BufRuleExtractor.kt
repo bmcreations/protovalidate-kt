@@ -364,12 +364,12 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
         }
         return StringRuleSet(
             const = if (r.hasConst()) r.const else null,
-            len = if (r.hasLen()) r.len.toLong() else null,
-            minLen = if (r.hasMinLen()) r.minLen.toLong() else null,
-            maxLen = if (r.hasMaxLen()) r.maxLen.toLong() else null,
-            lenBytes = if (r.hasLenBytes()) r.lenBytes.toLong() else null,
-            minBytes = if (r.hasMinBytes()) r.minBytes.toLong() else null,
-            maxBytes = if (r.hasMaxBytes()) r.maxBytes.toLong() else null,
+            len = if (r.hasLen()) r.len else null,
+            minLen = if (r.hasMinLen()) r.minLen else null,
+            maxLen = if (r.hasMaxLen()) r.maxLen else null,
+            lenBytes = if (r.hasLenBytes()) r.lenBytes else null,
+            minBytes = if (r.hasMinBytes()) r.minBytes else null,
+            maxBytes = if (r.hasMaxBytes()) r.maxBytes else null,
             pattern = if (r.hasPattern()) r.pattern else null,
             prefix = if (r.hasPrefix()) r.prefix else null,
             suffix = if (r.hasSuffix()) r.suffix else null,
@@ -395,9 +395,9 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
         }
         return BytesRuleSet(
             const = if (r.hasConst()) r.const.toByteArray() else null,
-            len = if (r.hasLen()) r.len.toLong() else null,
-            minLen = if (r.hasMinLen()) r.minLen.toLong() else null,
-            maxLen = if (r.hasMaxLen()) r.maxLen.toLong() else null,
+            len = if (r.hasLen()) r.len else null,
+            minLen = if (r.hasMinLen()) r.minLen else null,
+            maxLen = if (r.hasMaxLen()) r.maxLen else null,
             pattern = if (r.hasPattern()) r.pattern else null,
             prefix = if (r.hasPrefix()) r.prefix.toByteArray() else null,
             suffix = if (r.hasSuffix()) r.suffix.toByteArray() else null,
@@ -621,8 +621,8 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
 
     private fun convertRepeatedRules(r: build.buf.validate.RepeatedRules, ignoreMode: IgnoreMode): RepeatedRuleSet {
         return RepeatedRuleSet(
-            minItems = if (r.hasMinItems()) r.minItems.toLong() else null,
-            maxItems = if (r.hasMaxItems()) r.maxItems.toLong() else null,
+            minItems = if (r.hasMinItems()) r.minItems else null,
+            maxItems = if (r.hasMaxItems()) r.maxItems else null,
             unique = r.hasUnique() && r.unique,
             ignore = ignoreMode,
             items = if (r.hasItems()) convertFieldRules(r.items) else null,
@@ -632,8 +632,8 @@ build.buf.validate.StringRules.WellKnownCase.TUUID -> if (r.tuuid) StringWellKno
     // ── Map ──
 
     private fun convertMapRules(r: build.buf.validate.MapRules, ignoreMode: IgnoreMode): MapRuleSet = MapRuleSet(
-        minPairs = if (r.hasMinPairs()) r.minPairs.toLong() else null,
-        maxPairs = if (r.hasMaxPairs()) r.maxPairs.toLong() else null,
+        minPairs = if (r.hasMinPairs()) r.minPairs else null,
+        maxPairs = if (r.hasMaxPairs()) r.maxPairs else null,
         ignore = ignoreMode,
         keys = if (r.hasKeys()) convertFieldRules(r.keys) else null,
         values = if (r.hasValues()) convertFieldRules(r.values) else null,

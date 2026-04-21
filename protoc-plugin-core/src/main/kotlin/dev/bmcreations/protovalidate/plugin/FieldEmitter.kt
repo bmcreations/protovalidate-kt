@@ -1060,7 +1060,6 @@ object FieldEmitter {
         Type.TYPE_BOOL -> CelFieldType.BOOL
         Type.TYPE_ENUM -> CelFieldType.ENUM
         Type.TYPE_MESSAGE, Type.TYPE_GROUP -> CelFieldType.MESSAGE
-        else -> CelFieldType.UNKNOWN
     }
 
     /**
