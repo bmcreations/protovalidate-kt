@@ -59,6 +59,13 @@ class ProtovalidatePlugin : Plugin<Project> {
                 task.plugins { plugins ->
                     plugins.create(pluginName)
                 }
+
+                // PGV protos import validate/validate.proto — extract the bundled
+                // copy and add it to protoc's include path.
+                if (variant == "pgv") {
+                    val includeDir = extractValidateProto(project)
+                    task.addIncludeDir(project.files(includeDir))
+                }
             }
         }
 
@@ -90,6 +97,24 @@ class ProtovalidatePlugin : Plugin<Project> {
         )
         script.setExecutable(true)
         return script
+    }
+
+    /**
+     * Extracts validate/validate.proto from the plugin JAR resources into
+     * the build directory so protoc can find it on the include path.
+     */
+    private fun extractValidateProto(project: Project): File {
+        val includeDir = project.layout.buildDirectory
+            .dir("protovalidate/include").get().asFile
+        val protoFile = File(includeDir, "validate/validate.proto")
+        if (!protoFile.exists()) {
+            protoFile.parentFile.mkdirs()
+            val stream = ProtovalidatePlugin::class.java
+                .getResourceAsStream("/validate/validate.proto")
+                ?: error("protovalidate: bundled validate/validate.proto not found in plugin JAR")
+            protoFile.writeBytes(stream.readBytes())
+        }
+        return includeDir
     }
 
     private fun resolvePluginVersion(project: Project): String {
