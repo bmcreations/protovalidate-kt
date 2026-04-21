@@ -12,7 +12,7 @@ class ProtovalidatePlugin : Plugin<Project> {
             "protovalidate",
             ProtovalidateExtension::class.java,
         )
-        ext.variant.convention("buf")
+        ext.variant.convention(ProtoVariant.BUF)
 
         project.pluginManager.withPlugin("com.google.protobuf") {
             configureProtobuf(project, ext)
@@ -50,9 +50,8 @@ class ProtovalidatePlugin : Plugin<Project> {
         protobuf.generateProtoTasks {
             val variant = ext.variant.get()
             val pluginName = when (variant) {
-                "buf" -> "validate-kt-buf"
-                "pgv" -> "validate-kt"
-                else -> error("protovalidate: unknown variant '$variant'. Use 'buf' or 'pgv'.")
+                ProtoVariant.BUF -> "validate-kt-buf"
+                ProtoVariant.PGV -> "validate-kt"
             }
 
             it.all().configureEach { task ->
@@ -62,7 +61,7 @@ class ProtovalidatePlugin : Plugin<Project> {
 
                 // PGV protos import validate/validate.proto — extract the bundled
                 // copy and add it to protoc's include path.
-                if (variant == "pgv") {
+                if (variant == ProtoVariant.PGV) {
                     val includeDir = extractValidateProto(project)
                     task.addIncludeDir(project.files(includeDir))
                 }

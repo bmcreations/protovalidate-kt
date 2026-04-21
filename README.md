@@ -37,8 +37,10 @@ This automatically:
 By default the **buf validate** variant is used. To use PGV instead:
 
 ```kotlin
+import dev.bmcreations.protovalidate.gradle.ProtoVariant
+
 protovalidate {
-    variant.set("pgv")
+    variant.set(ProtoVariant.PGV)
 }
 ```
 
@@ -68,7 +70,7 @@ message User {
 }
 ```
 
-PGV protos import `validate/validate.proto`. If protoc can't find it, add the proto include path. The Gradle plugin handles this automatically when using `variant.set("pgv")`.
+PGV protos import `validate/validate.proto`. If protoc can't find it, add the proto include path. The Gradle plugin handles this automatically when using `ProtoVariant.PGV`.
 
 ### Manual setup (without the Gradle plugin)
 
