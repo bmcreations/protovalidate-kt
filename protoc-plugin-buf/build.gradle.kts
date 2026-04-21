@@ -31,7 +31,5 @@ tasks.named<Jar>("jar") {
 
 mavenPublishing {
     publishToMavenCentral()
-    if (providers.gradleProperty("signingInMemoryKey").isPresent) {
-        signAllPublications()
-    }
+    signAllPublications()
 }

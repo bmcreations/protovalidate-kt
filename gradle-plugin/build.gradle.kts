@@ -22,9 +22,7 @@ gradlePlugin {
 
 mavenPublishing {
     publishToMavenCentral()
-    if (providers.gradleProperty("signingInMemoryKey").isPresent) {
-        signAllPublications()
-    }
+    signAllPublications()
 }
 
 // Bake the project version into a resource so the plugin can resolve
