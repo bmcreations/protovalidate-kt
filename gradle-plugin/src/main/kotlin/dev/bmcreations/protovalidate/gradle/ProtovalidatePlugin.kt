@@ -1,9 +1,9 @@
 package dev.bmcreations.protovalidate.gradle
 
-import com.google.protobuf.gradle.GenerateProtoTask
 import com.google.protobuf.gradle.ProtobufExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import java.io.File
 
 class ProtovalidatePlugin : Plugin<Project> {
 
@@ -23,14 +23,25 @@ class ProtovalidatePlugin : Plugin<Project> {
         val protobuf = project.extensions.getByType(ProtobufExtension::class.java)
         val version = resolvePluginVersion(project)
 
-        // Register both plugin executables eagerly — this must happen before
-        // afterEvaluate where the protobuf plugin resolves tools.
+        // Resolve both plugin fat JARs via detached configurations.
+        // The protobuf-gradle-plugin's `artifact` mode appends a platform classifier
+        // (e.g. osx-aarch_64) which doesn't apply to our JVM fat JARs.
+        // Instead, we resolve the JAR ourselves and use `path` with a trampoline script.
+        val bufJar = resolvePluginJar(project, "protoc-plugin-buf", version)
+        val pgvJar = resolvePluginJar(project, "protoc-plugin", version)
+
+        val trampolineDir = project.layout.buildDirectory.dir("protovalidate/bin").get().asFile
+        trampolineDir.mkdirs()
+
+        val bufTrampoline = writeTrampoline(trampolineDir, "protoc-gen-validate-kt-buf", bufJar)
+        val pgvTrampoline = writeTrampoline(trampolineDir, "protoc-gen-validate-kt", pgvJar)
+
         protobuf.plugins {
             it.create("validate-kt-buf") { locator ->
-                locator.artifact = "dev.bmcreations.protovalidate:protoc-plugin-buf:$version@jar"
+                locator.path = bufTrampoline.absolutePath
             }
             it.create("validate-kt") { locator ->
-                locator.artifact = "dev.bmcreations.protovalidate:protoc-plugin:$version@jar"
+                locator.path = pgvTrampoline.absolutePath
             }
         }
 
@@ -51,7 +62,7 @@ class ProtovalidatePlugin : Plugin<Project> {
             }
         }
 
-        // Add runtime dependency. Use afterEvaluate so configurations are resolved.
+        // Add runtime dependency.
         project.afterEvaluate {
             project.configurations.findByName("implementation")?.let {
                 project.dependencies.add(
@@ -62,15 +73,32 @@ class ProtovalidatePlugin : Plugin<Project> {
         }
     }
 
+    private fun resolvePluginJar(project: Project, artifactId: String, version: String): File {
+        val dep = project.dependencies.create("dev.bmcreations.protovalidate:$artifactId:$version")
+        val config = project.configurations.detachedConfiguration(dep)
+        config.isTransitive = false
+        return config.singleFile
+    }
+
+    private fun writeTrampoline(dir: File, name: String, jar: File): File {
+        val script = File(dir, name)
+        script.writeText(
+            """
+            |#!/bin/sh
+            |exec java -jar "${jar.absolutePath}" "$@"
+            """.trimMargin() + "\n"
+        )
+        script.setExecutable(true)
+        return script
+    }
+
     private fun resolvePluginVersion(project: Project): String {
-        // Read from the version resource baked in at publish time
         val stream = ProtovalidatePlugin::class.java
             .getResourceAsStream("/dev/bmcreations/protovalidate/gradle/version.txt")
         if (stream != null) {
             return stream.bufferedReader().readLine().trim()
         }
 
-        // Fallback: check if the user set a version property
         val prop = project.findProperty("protovalidate.version") as? String
         if (prop != null) return prop
 
