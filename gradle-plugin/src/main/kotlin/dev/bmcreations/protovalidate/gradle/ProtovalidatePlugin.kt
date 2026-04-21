@@ -73,14 +73,14 @@ class ProtovalidatePlugin : Plugin<Project> {
             project.configurations.findByName("implementation")?.let {
                 project.dependencies.add(
                     "implementation",
-                    "dev.bmcreations.protovalidate:runtime:$version",
+                    "dev.bmcreations:protovalidate-runtime:$version",
                 )
             }
         }
     }
 
     private fun resolvePluginJar(project: Project, artifactId: String, version: String): File {
-        val dep = project.dependencies.create("dev.bmcreations.protovalidate:$artifactId:$version")
+        val dep = project.dependencies.create("dev.bmcreations:protovalidate-$artifactId:$version")
         val config = project.configurations.detachedConfiguration(dep)
         config.isTransitive = false
         return config.singleFile
