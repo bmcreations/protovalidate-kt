@@ -17,21 +17,30 @@ Generates Kotlin validation functions from protobuf constraint annotations at co
 
 ## Usage
 
-### As a protoc plugin
+There are two plugins depending on which constraint system your protos use:
 
-Build the plugin JAR:
+- **`protoc-plugin-buf`** — for [buf validate](https://github.com/bufbuild/protovalidate) (`buf.validate` annotations). This is the recommended approach for new projects.
+- **`protoc-plugin`** — for [protoc-gen-validate](https://github.com/bufbuild/protoc-gen-validate) (PGV, `validate/validate.proto` annotations). Use this if your protos already use PGV constraints.
+
+Both plugins work the same way: `protoc` invokes them as executables during code generation. Each module includes a shell wrapper script that calls `java -jar` on the built fat JAR.
+
+### buf validate (recommended)
+
+Build the plugin:
 
 ```bash
 ./gradlew :protoc-plugin-buf:jar
 ```
 
-Then reference it in your Gradle protobuf configuration:
+In your consuming project's `build.gradle.kts`:
 
 ```kotlin
 protobuf {
     plugins {
         create("validate-kt-buf") {
-            path = "/path/to/protoc-plugin-buf/build/libs/protoc-plugin-buf.jar"
+            // Points to the shell wrapper script, which invokes the fat JAR.
+            // protoc requires an executable — it cannot run a JAR directly.
+            path = "/path/to/protovalidate-kt/protoc-plugin-buf/protoc-gen-validate-kt-buf"
         }
     }
     generateProtoTasks {
@@ -40,11 +49,52 @@ protobuf {
         }
     }
 }
+
+// Ensure the plugin JAR is built before protoc runs (only needed if
+// protovalidate-kt is included as a composite build or subproject)
+afterEvaluate {
+    tasks.withType<com.google.protobuf.gradle.GenerateProtoTask>().configureEach {
+        dependsOn(":protoc-plugin-buf:jar")
+    }
+}
+```
+
+### PGV (legacy)
+
+Build the plugin:
+
+```bash
+./gradlew :protoc-plugin:jar
+```
+
+In your consuming project's `build.gradle.kts`:
+
+```kotlin
+protobuf {
+    plugins {
+        create("validate-kt") {
+            path = "/path/to/protovalidate-kt/protoc-plugin/protoc-gen-validate-kt"
+        }
+    }
+    generateProtoTasks {
+        all().forEach {
+            // PGV protos import validate/validate.proto — add it to the include path
+            it.addIncludeDir(files("/path/to/protovalidate-kt/protos/validate"))
+            it.plugins { create("validate-kt") }
+        }
+    }
+}
+
+afterEvaluate {
+    tasks.withType<com.google.protobuf.gradle.GenerateProtoTask>().configureEach {
+        dependsOn(":protoc-plugin:jar")
+    }
+}
 ```
 
 ### Runtime dependency
 
-Add the `runtime` module as a dependency for the generated validation code:
+The generated validation code calls helper functions from the `runtime` module. Add it as a dependency:
 
 ```kotlin
 dependencies {
