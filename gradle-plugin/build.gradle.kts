@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm")
     `java-gradle-plugin`
+    signing
     id("com.vanniktech.maven.publish")
 }
 
@@ -18,6 +19,15 @@ gradlePlugin {
             implementationClass = "dev.bmcreations.protovalidate.gradle.ProtovalidatePlugin"
         }
     }
+}
+
+// Explicitly configure the signatory so the marker publication created by
+// java-gradle-plugin is also signed (vanniktech alone doesn't reach it).
+signing {
+    val signingKey = providers.gradleProperty("signingInMemoryKey").orNull
+    val signingKeyId = providers.gradleProperty("signingInMemoryKeyId").orNull
+    val signingPassword = providers.gradleProperty("signingInMemoryKeyPassword").orNull
+    useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
 }
 
 mavenPublishing {
