@@ -19,8 +19,37 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Build
+      - name: Build & Test
         run: ./gradlew build
 
-      - name: Test
-        run: ./gradlew check
+  conformance:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build conformance JARs
+        run: ./gradlew :conformance:jar :pgv-conformance:jar
+
+      - name: Install buf conformance harness
+        run: go install github.com/bufbuild/protovalidate/tools/protovalidate-conformance@latest
+
+      - name: Run buf conformance tests
+        run: ./conformance/run-conformance.sh
+
+      - name: Build PGV conformance runner
+        run: cd pgv-conformance/runner && go build -o pgv-conformance-runner .
+
+      - name: Run PGV conformance tests
+        run: ./pgv-conformance/run-conformance.sh
