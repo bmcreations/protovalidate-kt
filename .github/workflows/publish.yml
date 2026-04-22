@@ -22,7 +22,7 @@ jobs:
       - name: Publish to Maven Central
         run: |
           ORG_GRADLE_PROJECT_signingInMemoryKey="$(echo "$SIGNING_KEY_BASE64" | base64 -d)" \
-          ./gradlew publishAndReleaseToMavenCentral
+          ./gradlew publishAndReleaseToMavenCentral --stacktrace
         env:
           SIGNING_KEY_BASE64: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
