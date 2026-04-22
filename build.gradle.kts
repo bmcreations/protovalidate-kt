@@ -5,6 +5,14 @@ plugins {
 
 // Root build file for protovalidate-kt.
 
+// Allow builds to succeed without signing credentials (local dev).
+// CI provides the signing key via environment variables.
+subprojects {
+    tasks.withType<Sign>().configureEach {
+        isRequired = providers.gradleProperty("signingInMemoryKey").isPresent
+    }
+}
+
 // Exclude conformance modules from the default build — they generate a huge
 // amount of code and are run separately in CI via their own job.
 // To build them, target the module explicitly: ./gradlew :conformance:jar
