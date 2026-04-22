@@ -5,11 +5,23 @@ plugins {
 
 // Root build file for protovalidate-kt.
 
-// Allow builds to succeed without signing credentials (local dev).
-// CI provides the signing key via environment variables.
+// Configure signing for all subprojects. CI provides the signing key via
+// ORG_GRADLE_PROJECT_signingInMemoryKey* environment variables.
+// Locally, signing is optional (isRequired = false).
+val signingKey = providers.gradleProperty("signingInMemoryKey")
 subprojects {
+    plugins.withType<SigningPlugin> {
+        configure<SigningExtension> {
+            val keyId = providers.gradleProperty("signingInMemoryKeyId").orNull
+            val key = signingKey.orNull
+            val password = providers.gradleProperty("signingInMemoryKeyPassword").orNull
+            if (key != null) {
+                useInMemoryPgpKeys(keyId, key, password)
+            }
+        }
+    }
     tasks.withType<Sign>().configureEach {
-        isRequired = providers.gradleProperty("signingInMemoryKey").isPresent
+        isRequired = signingKey.isPresent
     }
 }
 
