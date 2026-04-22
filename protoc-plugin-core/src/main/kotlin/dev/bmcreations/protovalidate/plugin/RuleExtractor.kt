@@ -13,4 +13,12 @@ interface RuleExtractor {
     fun isOneofRequired(options: OneofOptions): Boolean
     fun getMessageOneofRules(options: MessageOptions): List<MessageOneofRuleSet> = emptyList()
     fun getMessageCelRules(options: MessageOptions): List<MessageCelRule> = emptyList()
+
+    /**
+     * Whether `ignore_empty` / `IF_DEFAULT_VALUE` on oneof fields should skip
+     * validation when the value is the zero/default. PGV semantics: true (zero
+     * value is "empty" even if the field is the active oneof member). Buf validate
+     * semantics: false (an explicitly set oneof member is never "empty").
+     */
+    val oneofIgnoreEmptySkipsZeroValue: Boolean get() = false
 }

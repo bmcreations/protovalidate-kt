@@ -9,6 +9,8 @@ import io.envoyproxy.pgv.validate.Validate.*
 
 class PgvRuleExtractor : RuleExtractor {
 
+    override val oneofIgnoreEmptySkipsZeroValue: Boolean get() = true
+
     private val registry = ExtensionRegistry.newInstance().also {
         Validate.registerAllExtensions(it)
     }

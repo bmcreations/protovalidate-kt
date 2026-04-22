@@ -187,7 +187,8 @@ object CodeGenerator {
                             messageOneofRules = messageOneofRules,
                             messageCelRules = supportedMessageCelRules,
                             validatedTypes = validatedTypes,
-                            fileSyntax = fileSyntax
+                            fileSyntax = fileSyntax,
+                            oneofIgnoreEmptySkipsZeroValue = extractor.oneofIgnoreEmptySkipsZeroValue
                         )
                     }
                 }
@@ -264,7 +265,8 @@ object CodeGenerator {
         messageOneofRules: List<MessageOneofRuleSet>,
         messageCelRules: List<MessageCelRule> = emptyList(),
         validatedTypes: Map<String, String>,
-        fileSyntax: FileSyntax
+        fileSyntax: FileSyntax,
+        oneofIgnoreEmptySkipsZeroValue: Boolean = false
     ): String {
         // Build the fully-qualified receiver type
         val receiverType = buildReceiverType(
@@ -403,7 +405,14 @@ object CodeGenerator {
                             fileSyntax = fileSyntax,
                             nestedTypes = messageProto.nestedTypeList
                         )
-                        FieldEmitter.emit(field, rules, "", oneofCtx)
+                        // The oneof case guard already ensures the field is the active
+                        // member. For buf validate, an explicitly set oneof member is
+                        // never "empty" so we strip IF_DEFAULT_VALUE. For PGV, the
+                        // zero value IS considered empty even on active oneof members.
+                        val effectiveRules = if (rules.ignore == IgnoreMode.IF_DEFAULT_VALUE && !oneofIgnoreEmptySkipsZeroValue) {
+                            rules.copy(ignore = IgnoreMode.UNSPECIFIED)
+                        } else rules
+                        FieldEmitter.emit(field, effectiveRules, "", oneofCtx)
                         bodySb.appendLine("    }")
                     }
                 } else {
