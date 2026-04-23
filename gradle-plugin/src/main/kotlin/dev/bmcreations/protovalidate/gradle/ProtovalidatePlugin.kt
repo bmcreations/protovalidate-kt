@@ -31,17 +31,42 @@ class ProtovalidatePlugin : Plugin<Project> {
         val pgvJar = resolvePluginJar(project, "protoc-plugin", version)
 
         val trampolineDir = project.layout.buildDirectory.dir("protovalidate/bin").get().asFile
-        trampolineDir.mkdirs()
+        val bufTrampolinePath = File(trampolineDir, "protoc-gen-validate-kt-buf").absolutePath
+        val pgvTrampolinePath = File(trampolineDir, "protoc-gen-validate-kt").absolutePath
 
-        val bufTrampoline = writeTrampoline(trampolineDir, "protoc-gen-validate-kt-buf", bufJar)
-        val pgvTrampoline = writeTrampoline(trampolineDir, "protoc-gen-validate-kt", pgvJar)
+        // Register a task to create trampoline scripts during execution phase,
+        // so they survive `clean` when running `clean assembleRelease`.
+        val setupTrampolines = project.tasks.register("setupProtovalidateTrampolines") { task ->
+            task.outputs.dir(trampolineDir)
+            task.doLast {
+                trampolineDir.mkdirs()
+                writeTrampoline(trampolineDir, "protoc-gen-validate-kt-buf", bufJar)
+                writeTrampoline(trampolineDir, "protoc-gen-validate-kt", pgvJar)
+            }
+        }
 
+        // Register a task to extract validate/validate.proto during execution phase.
+        val includeDir = project.layout.buildDirectory
+            .dir("protovalidate/include").get().asFile
+        val extractProtos = project.tasks.register("extractProtovalidateIncludes") { task ->
+            task.outputs.dir(includeDir)
+            task.doLast {
+                val protoFile = File(includeDir, "validate/validate.proto")
+                protoFile.parentFile.mkdirs()
+                val stream = ProtovalidatePlugin::class.java
+                    .getResourceAsStream("/validate/validate.proto")
+                    ?: error("protovalidate: bundled validate/validate.proto not found in plugin JAR")
+                protoFile.writeBytes(stream.readBytes())
+            }
+        }
+
+        // Set paths at configuration time — protoc reads them at execution time.
         protobuf.plugins {
             it.create("validate-kt-buf") { locator ->
-                locator.path = bufTrampoline.absolutePath
+                locator.path = bufTrampolinePath
             }
             it.create("validate-kt") { locator ->
-                locator.path = pgvTrampoline.absolutePath
+                locator.path = pgvTrampolinePath
             }
         }
 
@@ -55,6 +80,8 @@ class ProtovalidatePlugin : Plugin<Project> {
             }
 
             it.all().configureEach { task ->
+                task.dependsOn(setupTrampolines)
+
                 task.plugins { plugins ->
                     plugins.create(pluginName)
                 }
@@ -62,7 +89,7 @@ class ProtovalidatePlugin : Plugin<Project> {
                 // PGV protos import validate/validate.proto — extract the bundled
                 // copy and add it to protoc's include path.
                 if (variant == ProtoVariant.PGV) {
-                    val includeDir = extractValidateProto(project)
+                    task.dependsOn(extractProtos)
                     task.addIncludeDir(project.files(includeDir))
                 }
             }
@@ -98,23 +125,6 @@ class ProtovalidatePlugin : Plugin<Project> {
         return script
     }
 
-    /**
-     * Extracts validate/validate.proto from the plugin JAR resources into
-     * the build directory so protoc can find it on the include path.
-     */
-    private fun extractValidateProto(project: Project): File {
-        val includeDir = project.layout.buildDirectory
-            .dir("protovalidate/include").get().asFile
-        val protoFile = File(includeDir, "validate/validate.proto")
-        if (!protoFile.exists()) {
-            protoFile.parentFile.mkdirs()
-            val stream = ProtovalidatePlugin::class.java
-                .getResourceAsStream("/validate/validate.proto")
-                ?: error("protovalidate: bundled validate/validate.proto not found in plugin JAR")
-            protoFile.writeBytes(stream.readBytes())
-        }
-        return includeDir
-    }
 
     private fun resolvePluginVersion(project: Project): String {
         val stream = ProtovalidatePlugin::class.java
