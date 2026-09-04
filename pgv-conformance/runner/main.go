@@ -59,6 +59,13 @@ func main() {
 			}
 
 			expectValid := tc.Failures == 0
+			if !expectValid && !result.Valid && len(result.Reasons) != tc.Failures {
+				atomic.AddInt64(&failed, 1)
+				mu.Lock()
+				failures = append(failures, fmt.Sprintf("COUNT: %s: expected %d failures, got %d (%v)", tc.Name, tc.Failures, len(result.Reasons), result.Reasons))
+				mu.Unlock()
+				return
+			}
 			if result.Valid == expectValid {
 				atomic.AddInt64(&passed, 1)
 				if *verbose {

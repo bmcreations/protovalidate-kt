@@ -21,4 +21,15 @@ interface RuleExtractor {
      * semantics: false (an explicitly set oneof member is never "empty").
      */
     val oneofIgnoreEmptySkipsZeroValue: Boolean get() = false
+
+    /**
+     * Whether `required` on a oneof member asserts that the member is the active
+     * case. Buf validate semantics: true — `required` uses `has` semantics, so a
+     * member that is not selected fails its own `required` check (see the
+     * `OneofRequiredWithRequiredField` conformance case). PGV semantics: false —
+     * the check is emitted inside the member's `switch` case, so it only applies
+     * when that member is selected, and "some arm must be set" is expressed by
+     * `option (validate.required) = true` on the oneof itself.
+     */
+    val oneofRequiredAssertsActiveCase: Boolean get() = true
 }

@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+// Not part of the upstream protoc-gen-validate harness. Covers a oneof with
+// `(validate.rules).message.required` on more than one arm, which upstream's
+// MessageRequiredOneof (a single-arm oneof) does not discriminate.
+
+package tests.harness.cases;
+option go_package = "github.com/envoyproxy/protoc-gen-validate/tests/harness/cases/go;cases";
+option java_package = "tests.harness.cases";
+option java_multiple_files = true;
+import "validate/validate.proto";
+import "tests/harness/cases/oneofs.proto";
+
+// PGV emits an arm's `required` inside that arm's `switch` case, so it only
+// applies when the arm is selected — selecting an arm is what sets it. Marking
+// every arm required must therefore stay satisfiable: setting either arm is
+// valid, and "some arm must be set" comes from the oneof's own `required`.
+message OneOfMultiRequired {
+    oneof o {
+        option (validate.required) = true;
+
+        TestOneOfMsg x = 1 [(validate.rules).message.required = true];
+        TestOneOfMsg y = 2 [(validate.rules).message.required = true];
+    }
+}
