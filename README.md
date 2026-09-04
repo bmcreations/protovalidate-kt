@@ -98,21 +98,19 @@ protobuf {
 
 For PGV, replace `validate-kt-buf` / `protoc-plugin-buf` with `validate-kt` / `protoc-plugin`.
 
-## Conformance
+## Variant differences
 
-### buf protovalidate (2872/2872 passing)
+`required` on a oneof member means different things in the two dialects, and the
+generated code differs to match:
 
-```bash
-./gradlew :conformance:jar
-conformance/run-conformance.sh
-```
+- **buf validate** gives it `has` semantics. A member that is not the set case
+  fails its own check, so at most one member of a oneof can be `required`.
+- **PGV** applies `(validate.rules).message.required` only when that member is
+  the set case, so several members can carry it.
 
-### PGV (1053/1053 passing)
-
-```bash
-./gradlew :pgv-conformance:jar
-cd pgv-conformance && ./run-conformance.sh
-```
+"Some member must be set" is a oneof-level option in both:
+`option (buf.validate.oneof).required = true` for buf,
+`option (validate.required) = true` for PGV.
 
 ## Building
 
@@ -120,6 +118,48 @@ Requires JDK 21+.
 
 ```bash
 ./gradlew build
+```
+
+### Golden tests
+
+`protoc-plugin` and `protoc-plugin-buf` each pin the Kotlin the generator emits
+for a fixture proto, under `src/test/resources/golden`. A codegen change fails
+`./gradlew build` with a diff of the emitted code. Read the diff, and once the
+new output is right, accept it:
+
+```bash
+./gradlew :protoc-plugin:test :protoc-plugin-buf:test -PupdateGoldens
+```
+
+Both modules use the same message shapes in their own dialect, so a diff between
+the two golden directories is where the variants diverge.
+
+## Conformance
+
+### buf protovalidate (2872/2872 passing)
+
+```bash
+go install github.com/bufbuild/protovalidate/tools/protovalidate-conformance@$(cat conformance/HARNESS_VERSION)
+./gradlew :conformance:jar
+./conformance/run-conformance.sh
+```
+
+The harness version is pinned in `conformance/HARNESS_VERSION` so a local run and
+CI check the same corpus.
+
+### PGV (1070/1070 passing)
+
+```bash
+(cd pgv-conformance/runner && go build -o pgv-conformance-runner .)
+./gradlew :pgv-conformance:jar
+./pgv-conformance/run-conformance.sh
+```
+
+Every message in the vendored harness protos has to be the subject of at least
+one case. CI enforces that:
+
+```bash
+./pgv-conformance/check-coverage.sh
 ```
 
 ## License
