@@ -384,21 +384,28 @@ object CodeGenerator {
                         val quotedField = "\"${field.name}\""
                         // Required = this field must be the active case
                         bodySb.appendLine("    Validators.checkRequired($caseAccessor == $caseEnum.$caseValue, $quotedField)?.let { violations += it }")
-                        // Type-specific rules only when this field is active
-                        val hasTypeRules = rules.type != RuleType.NONE
-                        if (hasTypeRules) {
+                        // Everything else — type rules, and recursion into a
+                        // message field whose type has its own validator — only
+                        // when this field is active. Emit to a scratch buffer
+                        // first: a field carrying nothing but `required` has no
+                        // remaining checks, and an empty case guard is noise.
+                        val oneofSb = StringBuilder()
+                        val oneofImports = mutableSetOf<String>()
+                        val oneofCtx = EmitContext(
+                            sb = oneofSb,
+                            indent = "        ",
+                            validatedTypes = validatedTypes,
+                            neededImports = oneofImports,
+                            fileSyntax = fileSyntax,
+                            nestedTypes = messageProto.nestedTypeList
+                        )
+                        // Emit only the remaining rules, skip the required check
+                        val rulesWithoutRequired = rules.copy(message = rules.message.copy(required = false))
+                        FieldEmitter.emit(field, rulesWithoutRequired, "", oneofCtx)
+                        if (oneofSb.isNotBlank()) {
+                            neededImports += oneofImports
                             bodySb.appendLine("    if ($caseAccessor == $caseEnum.$caseValue) {")
-                            val oneofCtx = EmitContext(
-                                sb = bodySb,
-                                indent = "        ",
-                                validatedTypes = validatedTypes,
-                                neededImports = neededImports,
-                                fileSyntax = fileSyntax,
-                                nestedTypes = messageProto.nestedTypeList
-                            )
-                            // Emit only type-specific rules, skip the required check
-                            val rulesWithoutRequired = rules.copy(message = rules.message.copy(required = false))
-                            FieldEmitter.emit(field, rulesWithoutRequired, "", oneofCtx)
+                            bodySb.append(oneofSb)
                             bodySb.appendLine("    }")
                         }
                     } else {

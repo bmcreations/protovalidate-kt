@@ -1,9 +1,7 @@
 package dev.bmcreations.protovalidate.plugin.buf
 
-import dev.bmcreations.protovalidate.plugin.CodeGenerator
-import dev.bmcreations.protovalidate.plugin.RuleExtractor
+import dev.bmcreations.protovalidate.plugin.PluginPipeline
 import com.google.protobuf.Descriptors
-import com.google.protobuf.DescriptorProtos.DescriptorProto
 import com.google.protobuf.DescriptorProtos.FileDescriptorProto
 import com.google.protobuf.DynamicMessage
 import com.google.protobuf.ExtensionRegistry
@@ -29,23 +27,6 @@ fun main() {
     // Re-parse with full registry (still needed for proper field resolution)
     val request = CodeGeneratorRequest.parseFrom(rawBytes, registry)
 
-    val filesToGenerate = request.fileToGenerateList.toSet()
-
-    // First pass: scan ALL proto files to find which messages have validation rules.
-    val validatedTypes = mutableMapOf<String, String>()
-    for (fileProto in request.protoFileList) {
-        val javaPackage = if (fileProto.options.hasJavaPackage()) {
-            fileProto.options.javaPackage
-        } else {
-            fileProto.`package`
-        }
-        val protoPackage = fileProto.`package`
-        val prefix = if (protoPackage.isEmpty()) "." else ".$protoPackage."
-
-        scanMessages(fileProto.messageTypeList, prefix, javaPackage, extractor, validatedTypes)
-    }
-
-    // Second pass: generate validators for files we were asked to process.
     val responseBuilder = CodeGeneratorResponse.newBuilder()
     responseBuilder.supportedFeatures =
         (CodeGeneratorResponse.Feature.FEATURE_PROTO3_OPTIONAL.number.toLong() or
@@ -53,43 +34,15 @@ fun main() {
     responseBuilder.minimumEdition = com.google.protobuf.DescriptorProtos.Edition.EDITION_2023.number
     responseBuilder.maximumEdition = com.google.protobuf.DescriptorProtos.Edition.EDITION_2023.number
 
-    for (fileProto in request.protoFileList) {
-        if (fileProto.name !in filesToGenerate) continue
-
-        val generatedFiles = CodeGenerator.generate(fileProto, validatedTypes, extractor)
-        for (file in generatedFiles) {
-            responseBuilder.addFile(file)
-        }
-    }
+    responseBuilder.addAllFile(
+        PluginPipeline.generate(
+            protoFiles = request.protoFileList,
+            filesToGenerate = request.fileToGenerateList.toSet(),
+            extractor = extractor
+        )
+    )
 
     responseBuilder.build().writeTo(System.out)
-}
-
-private fun scanMessages(
-    messages: List<DescriptorProto>,
-    parentPrefix: String,
-    javaPackage: String,
-    extractor: RuleExtractor,
-    result: MutableMap<String, String>
-) {
-    for (msg in messages) {
-        val fullName = "$parentPrefix${msg.name}"
-
-        val hasValidatedFields = msg.fieldList.any { field ->
-            extractor.getFieldRules(field.options) != null
-        }
-        val hasRequiredOneofs = msg.oneofDeclList.any { oneof ->
-            oneof.options != null && extractor.isOneofRequired(oneof.options)
-        }
-        val hasMessageCelRules = msg.options != null &&
-            extractor.getMessageCelRules(msg.options).isNotEmpty()
-
-        if (hasValidatedFields || hasRequiredOneofs || hasMessageCelRules) {
-            result[fullName] = javaPackage
-        }
-
-        scanMessages(msg.nestedTypeList, "$fullName.", javaPackage, extractor, result)
-    }
 }
 
 /**
@@ -97,7 +50,7 @@ private fun scanMessages(
  * that target buf.validate rule messages (FloatRules, Int32Rules, etc.).
  * Returns a map of rule message full name → dynamic Descriptor for re-parsing.
  */
-private fun registerCustomExtensions(
+internal fun registerCustomExtensions(
     protoFiles: List<FileDescriptorProto>,
     registry: ExtensionRegistry,
     dynamicRegistry: ExtensionRegistry
