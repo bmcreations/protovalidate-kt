@@ -927,6 +927,11 @@ var stringCases = []TestCase{
 	{"string - non-strict valid header - invalid (NUL)", &cases.StringValidHeader{Val: "foo\u0000bar"}, 1},
 	{"string - non-strict valid header - invalid (CR)", &cases.StringValidHeader{Val: "example\r"}, 1},
 	{"string - non-strict valid header - invalid (NL)", &cases.StringValidHeader{Val: "exa\u000Ample"}, 1},
+
+	// Rules on a oneof member apply only when that member is selected.
+	{"string in oneof - in - valid (unset)", &cases.StringInOneOf{}, 0},
+	{"string in oneof - in - valid", &cases.StringInOneOf{Foo: &cases.StringInOneOf_Bar{Bar: "a"}}, 0},
+	{"string in oneof - in - invalid", &cases.StringInOneOf{Foo: &cases.StringInOneOf_Bar{Bar: "c"}}, 1},
 }
 
 var bytesCases = []TestCase{
@@ -1047,6 +1052,18 @@ var enumCases = []TestCase{
 
 	{"enum map (external) - defined_only - valid", &cases.MapExternalEnumDefined{Val: map[string]other_package.Embed_Enumerated{"foo": other_package.Embed_VALUE}}, 0},
 	{"enum map (external) - defined_only - invalid", &cases.MapExternalEnumDefined{Val: map[string]other_package.Embed_Enumerated{"foo": math.MaxInt32}}, 1},
+
+	// Rules on a oneof member apply only when that member is selected. Two
+	// independent oneofs in one message, so each arm is exercised on its own.
+	{"enum inside oneof - defined_only - valid (unset)", &cases.EnumInsideOneOf{}, 0},
+	{"enum inside oneof - defined_only - valid", &cases.EnumInsideOneOf{Foo: &cases.EnumInsideOneOf_Val{Val: cases.TestEnum_ONE}}, 0},
+	{"enum inside oneof - defined_only - invalid", &cases.EnumInsideOneOf{Foo: &cases.EnumInsideOneOf_Val{Val: math.MaxInt32}}, 1},
+	{"enum inside oneof - not_in - valid", &cases.EnumInsideOneOf{Bar: &cases.EnumInsideOneOf_Val2{Val2: cases.TestEnum_ONE}}, 0},
+	{"enum inside oneof - not_in - invalid", &cases.EnumInsideOneOf{Bar: &cases.EnumInsideOneOf_Val2{Val2: cases.TestEnum_ZERO}}, 1},
+	{"enum inside oneof - both arms - valid", &cases.EnumInsideOneOf{Foo: &cases.EnumInsideOneOf_Val{Val: cases.TestEnum_ONE}, Bar: &cases.EnumInsideOneOf_Val2{Val2: cases.TestEnum_TWO}}, 0},
+
+	{"enum external (double embed) - defined_only - valid", &cases.EnumExternal2{Val: other_package.Embed_DoubleEmbed_VALUE}, 0},
+	{"enum external (double embed) - defined_only - invalid", &cases.EnumExternal2{Val: math.MaxInt32}, 1},
 }
 
 var messageCases = []TestCase{
@@ -1078,6 +1095,8 @@ var messageCases = []TestCase{
 
 	{"message - required - valid", &cases.MessageRequiredButOptional{Val: &cases.TestMsg{Const: "foo"}}, 0},
 	{"message - required - valid (unset)", &cases.MessageRequiredButOptional{}, 0},
+
+	{"message - empty message - valid", &cases.MessageWith3DInside{}, 0},
 }
 
 var repeatedCases = []TestCase{
