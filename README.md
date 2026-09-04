@@ -78,14 +78,14 @@ If you prefer to configure things yourself:
 
 ```kotlin
 dependencies {
-    implementation("dev.bmcreations.protovalidate:runtime:<version>")
+    implementation("dev.bmcreations:protovalidate-runtime:<version>")
 }
 
 protobuf {
     plugins {
         // The protobuf-gradle-plugin auto-generates a wrapper script for JAR artifacts
         create("validate-kt-buf") {
-            artifact = "dev.bmcreations.protovalidate:protoc-plugin-buf:<version>@jar"
+            artifact = "dev.bmcreations:protovalidate-protoc-plugin-buf:<version>@jar"
         }
     }
     generateProtoTasks {
@@ -96,7 +96,8 @@ protobuf {
 }
 ```
 
-For PGV, replace `validate-kt-buf` / `protoc-plugin-buf` with `validate-kt` / `protoc-plugin`.
+For PGV, replace `validate-kt-buf` / `protovalidate-protoc-plugin-buf` with
+`validate-kt` / `protovalidate-protoc-plugin`.
 
 ## Variant differences
 
