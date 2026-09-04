@@ -7,7 +7,12 @@ on:
       - 'v*'
 
 jobs:
+  # A tag push must not publish code the suites have not seen.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
