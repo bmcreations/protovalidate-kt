@@ -6,7 +6,9 @@ plugins {
     id("com.google.protobuf")
 }
 
-val archSuffix = if (Os.isFamily(Os.FAMILY_MAC)) ":osx-x86_64" else ""
+val archSuffix = if (Os.isFamily(Os.FAMILY_MAC)) {
+    if (System.getProperty("os.arch") == "aarch64") ":osx-aarch_64" else ":osx-x86_64"
+} else ""
 
 application {
     mainClass.set("dev.bmcreations.protovalidate.conformance.pgv.MainKt")
@@ -41,8 +43,13 @@ protobuf {
 }
 
 afterEvaluate {
+    // The plugin jar is an input, not just a dependency: without this, editing the
+    // generator leaves generateProto up-to-date and the suite runs against stale
+    // generated code.
     tasks.withType<com.google.protobuf.gradle.GenerateProtoTask>().configureEach {
         dependsOn(":protoc-plugin:jar")
+        inputs.file(rootProject.file("protoc-plugin/build/libs/protoc-plugin.jar"))
+            .withPropertyName("validateKtPluginJar")
     }
 }
 
