@@ -1231,6 +1231,15 @@ var oneofCases = []TestCase{
 	{"oneof - ignore_empty - valid (X)", &cases.OneOfIgnoreEmpty{O: &cases.OneOfIgnoreEmpty_X{X: ""}}, 0},
 	{"oneof - ignore_empty - valid (Y)", &cases.OneOfIgnoreEmpty{O: &cases.OneOfIgnoreEmpty_Y{Y: []byte("")}}, 0},
 	{"oneof - ignore_empty - valid (Z)", &cases.OneOfIgnoreEmpty{O: &cases.OneOfIgnoreEmpty_Z{Z: 0}}, 0},
+
+	// Every arm marked required. Selecting an arm is what sets it, so each arm
+	// in turn is valid and the only failure is the oneof's own required rule.
+	{"oneof - multi required - valid (X)", &cases.OneOfMultiRequired{O: &cases.OneOfMultiRequired_X{X: &cases.TestOneOfMsg{Val: true}}}, 0},
+	{"oneof - multi required - valid (Y)", &cases.OneOfMultiRequired{O: &cases.OneOfMultiRequired_Y{Y: &cases.TestOneOfMsg{Val: true}}}, 0},
+	{"oneof - multi required - invalid (empty)", &cases.OneOfMultiRequired{}, 1},
+	// The selected arm's own rules still run.
+	{"oneof - multi required - invalid (X)", &cases.OneOfMultiRequired{O: &cases.OneOfMultiRequired_X{X: &cases.TestOneOfMsg{}}}, 1},
+	{"oneof - multi required - invalid (Y)", &cases.OneOfMultiRequired{O: &cases.OneOfMultiRequired_Y{Y: &cases.TestOneOfMsg{}}}, 1},
 }
 
 var wrapperCases = []TestCase{

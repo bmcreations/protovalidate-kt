@@ -188,7 +188,8 @@ object CodeGenerator {
                             messageCelRules = supportedMessageCelRules,
                             validatedTypes = validatedTypes,
                             fileSyntax = fileSyntax,
-                            oneofIgnoreEmptySkipsZeroValue = extractor.oneofIgnoreEmptySkipsZeroValue
+                            oneofIgnoreEmptySkipsZeroValue = extractor.oneofIgnoreEmptySkipsZeroValue,
+                            oneofRequiredAssertsActiveCase = extractor.oneofRequiredAssertsActiveCase
                         )
                     }
                 }
@@ -266,7 +267,8 @@ object CodeGenerator {
         messageCelRules: List<MessageCelRule> = emptyList(),
         validatedTypes: Map<String, String>,
         fileSyntax: FileSyntax,
-        oneofIgnoreEmptySkipsZeroValue: Boolean = false
+        oneofIgnoreEmptySkipsZeroValue: Boolean = false,
+        oneofRequiredAssertsActiveCase: Boolean = true
     ): String {
         // Build the fully-qualified receiver type
         val receiverType = buildReceiverType(
@@ -368,12 +370,17 @@ object CodeGenerator {
                     val caseEnum = "$receiverType.${snakeToCamel(oneofName)}Case"
                     val caseValue = field.name.uppercase()
 
-                    // For required fields in a oneof, emit the required check OUTSIDE
-                    // the oneof case guard — required means the field must be set even
-                    // when another member is active. Only type-specific rules go inside.
+                    // Buf validate: `required` on a oneof member uses `has` semantics, so
+                    // the check goes OUTSIDE the case guard — a member that is not the active
+                    // case fails its own `required` check. Only type-specific rules go inside.
+                    //
+                    // PGV: `required` is emitted inside the member's `switch` case, so it only
+                    // applies when that member is selected. Such a field falls through to the
+                    // guarded path below, where the case guard already implies presence. "Some
+                    // arm must be set" is `option (validate.required) = true` on the oneof.
                     if (rules.message?.required == true && rules.ignore == IgnoreMode.ALWAYS) {
                         // IGNORE_ALWAYS takes precedence — skip all validation including required
-                    } else if (rules.message?.required == true) {
+                    } else if (rules.message?.required == true && oneofRequiredAssertsActiveCase) {
                         val quotedField = "\"${field.name}\""
                         // Required = this field must be the active case
                         bodySb.appendLine("    Validators.checkRequired($caseAccessor == $caseEnum.$caseValue, $quotedField)?.let { violations += it }")

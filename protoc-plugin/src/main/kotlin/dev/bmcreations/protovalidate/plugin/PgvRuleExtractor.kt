@@ -11,6 +11,8 @@ class PgvRuleExtractor : RuleExtractor {
 
     override val oneofIgnoreEmptySkipsZeroValue: Boolean get() = true
 
+    override val oneofRequiredAssertsActiveCase: Boolean get() = false
+
     private val registry = ExtensionRegistry.newInstance().also {
         Validate.registerAllExtensions(it)
     }
