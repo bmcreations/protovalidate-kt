@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+// Fixtures for the buf golden tests. The PGV module carries the same shapes in
+// protoc-gen-validate syntax, so a diff between the two golden directories is
+// the dialect difference, made explicit.
+
+package golden;
+
+option java_package = "golden";
+option java_multiple_files = true;
+
+import "buf/validate/validate.proto";
+
+message Inner {
+    string id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// The same shape as the PGV fixture, and it must NOT generate the same code.
+// buf `required` uses `has` semantics, so a member that is not the active case
+// fails its own check — pinned upstream by OneofRequiredWithRequiredField.
+message MultiRequiredOneof {
+    oneof scope {
+        option (buf.validate.oneof).required = true;
+
+        Inner chat = 1 [(buf.validate.field).required = true];
+        Inner profile = 2 [(buf.validate.field).required = true];
+    }
+}
+
+message SingleRequiredOneof {
+    oneof one {
+        option (buf.validate.oneof).required = true;
+
+        Inner val = 1 [(buf.validate.field).required = true];
+    }
+}
+
+// A oneof with no `required` on the oneof itself, so an unset oneof is valid.
+message OptionalOneof {
+    oneof o {
+        Inner val = 1 [(buf.validate.field).required = true];
+    }
+}
+
+// Type rules on oneof members are guarded by the case in both dialects.
+message ScalarRulesInOneof {
+    oneof o {
+        string x = 1 [(buf.validate.field).string = {min_len: 3, max_len: 5}];
+        int32 y = 2 [(buf.validate.field).int32.gt = 0];
+    }
+}
+
+// The same rule outside a oneof, where presence is not implied by a case.
+message PlainRequired {
+    Inner val = 1 [(buf.validate.field).required = true];
+}
