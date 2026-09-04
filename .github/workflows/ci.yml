@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  workflow_call:
   workflow_dispatch:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 jobs:
@@ -42,10 +45,13 @@ jobs:
         run: ./gradlew :conformance:jar :pgv-conformance:jar
 
       - name: Install buf conformance harness
-        run: go install github.com/bufbuild/protovalidate/tools/protovalidate-conformance@latest
+        run: go install github.com/bufbuild/protovalidate/tools/protovalidate-conformance@$(cat conformance/HARNESS_VERSION)
 
       - name: Run buf conformance tests
         run: ./conformance/run-conformance.sh
+
+      - name: Check PGV case coverage
+        run: ./pgv-conformance/check-coverage.sh
 
       - name: Build PGV conformance runner
         run: cd pgv-conformance/runner && go build -o pgv-conformance-runner .
