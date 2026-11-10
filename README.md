@@ -129,15 +129,15 @@ The protoc version is the one this plugin is built against, resolved as
 repositories. The plugin runs through a shell script, so Windows hosts are not
 supported.
 
-If Wire boxes oneofs (`boxOneOfsMinSize` in its `kotlin {}` block), pass the
-same value as `wire_box_oneofs_min_size`:
+If Wire boxes oneofs (`boxOneOfsMinSize` in its `kotlin {}` block), set
+`wireBoxOneOfsMinSize` to the same value, or with raw protoc pass it as
+`wire_box_oneofs_min_size`:
 `--validate-kt_out=target=wire,wire_box_oneofs_min_size=8:<dir>`. Oneofs with at
 least that many members are then read through Wire's `OneOf<Key, Value>?`
 property, and smaller ones stay one nullable property per member. The value has
 to match Wire's, or the validators won't compile. Like Wire, the default is
 5000. Protoc fails the run when the option is given without `target=wire`, on
 `protoc-gen-validate-kt-buf`, or with a value that isn't a positive integer.
-The Gradle plugin doesn't set the option yet.
 
 Generated files follow Wire's package choice: `(wire.wire_package)`, else
 `java_package`, else the proto `package`.
