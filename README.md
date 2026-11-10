@@ -67,11 +67,67 @@ option to protoc directly: `--validate-kt_out=target=wire:<dir>`. The default
 is `target=java`; any other value fails the run.
 
 The generated `validate()` has the same name and return type in both modes. In
-Wire mode it uses only common Kotlin APIs, so it compiles in a KMP `commonMain`
-(the `pgv-conformance-wire` module builds it for jvm and js). The Gradle plugin
-wires generation into a JVM source set only; for a KMP module, run protoc
-yourself and add the output directory to `commonMain`, as
-`pgv-conformance-wire/build.gradle.kts` does.
+Wire mode it uses only common Kotlin APIs, so it compiles in a KMP `commonMain`.
+
+### Kotlin Multiplatform with Wire
+
+protobuf-gradle-plugin only generates into JVM source sets. When
+`org.jetbrains.kotlin.multiplatform` is applied and `target` is `WIRE`, the
+plugin runs protoc itself in a `generateProtovalidateWire` task and adds the
+output and `protovalidate-runtime` to `commonMain`. Wire's Gradle plugin still
+generates the message classes:
+
+```kotlin
+import dev.bmcreations.protovalidate.gradle.MessageTarget
+import dev.bmcreations.protovalidate.gradle.ProtoVariant
+
+plugins {
+    kotlin("multiplatform") version "2.3.20"
+    id("com.squareup.wire") version "7.1.2"
+    id("dev.bmcreations.protovalidate") version "<version>"
+}
+
+kotlin {
+    jvm()
+    js(IR) { nodejs() }
+    iosSimulatorArm64()
+}
+
+wire {
+    // Wire needs validate/validate.proto to compile PGV protos. This is the
+    // copy bundled with the plugin; Wire's task depends on its extraction.
+    protoPath { srcDir(protovalidate.validateProtoDir) }
+    kotlin {}
+}
+
+protovalidate {
+    variant.set(ProtoVariant.PGV)
+    target.set(MessageTarget.WIRE)
+}
+```
+
+The validators are generated from `protoDirs`, which defaults to
+`src/commonMain/proto`, Wire's default source path. If your `wire { }` block
+points elsewhere, set the same directories on the plugin:
+
+```kotlin
+protovalidate {
+    protoDirs.setFrom("src/commonMain/protos")   // match wire { sourcePath { } }
+    importDirs.from("third_party/protos")        // match wire { protoPath { } }
+    wireBoxOneOfsMinSize.set(2)                  // match wire { kotlin { boxOneOfsMinSize = 2 } }
+}
+```
+
+Protos under `importDirs` resolve imports but get no validators.
+`validate/validate.proto` and the well-known types are always on the include
+path. Set `wireBoxOneOfsMinSize` to the same value as Wire's `boxOneOfsMinSize`, so
+the validators match the oneof shape Wire generated. It is passed to the
+generator as `wire_box_oneofs_min_size=N`.
+
+The protoc version is the one this plugin is built against, resolved as
+`com.google.protobuf:protoc:<version>:<os>-<arch>@exe` from your build's
+repositories. The plugin runs through a shell script, so Windows hosts are not
+supported.
 
 If Wire boxes oneofs (`boxOneOfsMinSize` in its `kotlin {}` block), pass the
 same value as `wire_box_oneofs_min_size`:
@@ -146,6 +202,19 @@ protobuf {
 
 For PGV, replace `validate-kt-buf` / `protovalidate-protoc-plugin-buf` with
 `validate-kt` / `protovalidate-protoc-plugin`.
+
+The runtime is a Kotlin Multiplatform library. Gradle resolves
+`protovalidate-runtime` to the artifact for each target through Gradle module
+metadata. Maven doesn't read that metadata, so Maven builds depend on the JVM
+artifact directly:
+
+```xml
+<dependency>
+    <groupId>dev.bmcreations</groupId>
+    <artifactId>protovalidate-runtime-jvm</artifactId>
+    <version>VERSION</version>
+</dependency>
+```
 
 ## Variant differences
 
