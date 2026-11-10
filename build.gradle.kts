@@ -29,7 +29,7 @@ subprojects {
 // Exclude conformance modules from the default build — they generate a huge
 // amount of code and are run separately in CI via their own job.
 // To build them, target the module explicitly: ./gradlew :conformance:jar
-val conformanceModules = setOf("conformance", "pgv-conformance")
+val conformanceModules = setOf("conformance", "pgv-conformance", "pgv-conformance-wire")
 val requestedTasks = gradle.startParameter.taskNames
 val conformanceRequested = requestedTasks.any { arg ->
     conformanceModules.any { mod -> arg.startsWith(":$mod") }
