@@ -7,6 +7,8 @@ plugins {
 dependencies {
     implementation(kotlin("stdlib"))
     compileOnly("com.google.protobuf:protobuf-gradle-plugin:0.9.6")
+    // KMP extension only; resolved from the consumer's build at runtime.
+    compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20")
 }
 
 gradlePlugin {
@@ -30,12 +32,16 @@ mavenPublishing {
 val generateVersionResource by tasks.registering {
     val outputDir = layout.buildDirectory.dir("generated/resources/version")
     val ver = providers.gradleProperty("VERSION_NAME")
+    // protoc and protobuf-java version for the KMP Wire task.
+    val protobufVersion = libs.versions.protobuf.get()
     inputs.property("version", ver)
+    inputs.property("protobufVersion", protobufVersion)
     outputs.dir(outputDir)
     doLast {
         val dir = outputDir.get().asFile.resolve("dev/bmcreations/protovalidate/gradle")
         dir.mkdirs()
         dir.resolve("version.txt").writeText(ver.get())
+        dir.resolve("protobuf-version.txt").writeText(protobufVersion)
     }
 }
 
