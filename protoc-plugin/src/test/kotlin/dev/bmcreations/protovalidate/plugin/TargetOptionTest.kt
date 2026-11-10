@@ -96,6 +96,8 @@ class TargetOptionTest {
             errorFor("target=wire,wire_box_oneofs_min_size"),
         )
         assertEquals("wire_box_oneofs_min_size requires target=wire", errorFor("wire_box_oneofs_min_size"))
+        // Only the wire_* keys treat a bare key as a value.
+        assertEquals(GeneratorTarget.JAVA, GeneratorTarget.fromParameter("target"))
     }
 
     @Test
