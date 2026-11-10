@@ -90,6 +90,15 @@ class TargetOptionTest {
     }
 
     @Test
+    fun bareBoxOneOfsMinSizeIsNotIgnored() {
+        assertEquals(
+            "wire_box_oneofs_min_size must be a positive integer, got ``",
+            errorFor("target=wire,wire_box_oneofs_min_size"),
+        )
+        assertEquals("wire_box_oneofs_min_size requires target=wire", errorFor("wire_box_oneofs_min_size"))
+    }
+
+    @Test
     fun repeatedBoxOneOfsMinSizeIsAResponseError() {
         assertEquals(
             "`wire_box_oneofs_min_size` given more than once: 1, 2",

@@ -71,8 +71,9 @@ data class WireOptions(val boxOneOfsMinSize: Int = DEFAULT_BOX_ONEOFS_MIN_SIZE) 
 internal fun singleValue(parameter: String, key: String): String? {
     val values = parameter.split(',')
         .map { it.trim() }
-        .filter { it.startsWith("$key=") }
-        .map { it.removePrefix("$key=") }
+        .filter { it == key || it.startsWith("$key=") }
+        // A bare key is an empty value, so it fails validation instead of being ignored.
+        .map { it.removePrefix(key).removePrefix("=") }
     if (values.size > 1) {
         throw PluginOptionException("`$key` given more than once: ${values.joinToString()}")
     }
