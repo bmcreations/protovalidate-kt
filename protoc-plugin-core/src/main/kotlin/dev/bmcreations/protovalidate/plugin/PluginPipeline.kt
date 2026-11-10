@@ -41,16 +41,40 @@ object PluginPipeline {
         return result
     }
 
-    /** Generates validators for [filesToGenerate], resolving types against all of [protoFiles]. */
+    /**
+     * Generates validators for [filesToGenerate], resolving types against all
+     * of [protoFiles], for the message classes [target] names.
+     */
     fun generate(
         protoFiles: List<FileDescriptorProto>,
         filesToGenerate: Set<String>,
-        extractor: RuleExtractor
+        extractor: RuleExtractor,
+        target: GeneratorTarget = GeneratorTarget.JAVA,
     ): List<CodeGeneratorResponse.File> {
         val validatedTypes = scanValidatedTypes(protoFiles, extractor)
+        val knownTypes = if (target == GeneratorTarget.WIRE) scanTypeNames(protoFiles) else emptySet()
         return protoFiles
             .filter { it.name in filesToGenerate }
-            .flatMap { CodeGenerator.generate(it, validatedTypes, extractor) }
+            .flatMap { CodeGenerator.generate(it, validatedTypes, extractor, target, knownTypes) }
+    }
+
+    /** Fully-qualified names (no leading dot) of every message and enum in [protoFiles]. */
+    private fun scanTypeNames(protoFiles: List<FileDescriptorProto>): Set<String> {
+        val names = mutableSetOf<String>()
+        fun scan(messages: List<DescriptorProto>, prefix: String) {
+            for (msg in messages) {
+                val name = prefix + msg.name
+                names += name
+                msg.enumTypeList.forEach { names += "$name.${it.name}" }
+                scan(msg.nestedTypeList, "$name.")
+            }
+        }
+        for (file in protoFiles) {
+            val prefix = if (file.`package`.isEmpty()) "" else "${file.`package`}."
+            file.enumTypeList.forEach { names += prefix + it.name }
+            scan(file.messageTypeList, prefix)
+        }
+        return names
     }
 
     private fun scanMessages(
