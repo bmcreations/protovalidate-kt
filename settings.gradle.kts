@@ -9,6 +9,7 @@ pluginManagement {
         kotlin("multiplatform") version "2.3.20"
         id("com.google.protobuf") version "0.9.6"
         id("com.vanniktech.maven.publish") version "0.36.0"
+        id("com.squareup.wire") version "7.1.2"
     }
 }
 
@@ -52,4 +53,5 @@ include(
     ":gradle-plugin",
     ":conformance",
     ":pgv-conformance",
+    ":pgv-conformance-wire",
 )
