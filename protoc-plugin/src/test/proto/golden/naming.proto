@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+// Field and package naming for the Wire target. Wire renames a field that
+// clashes with a Kotlin keyword or one of its own members (`value_`,
+// `adapter_`), qualifies a field named like its type, and takes the Kotlin
+// package from java_package with no outer class. The validators for this file
+// are compiled against real Wire output in :pgv-conformance-wire.
+
+package golden.naming;
+
+option java_package = "golden.naming.javapkg";
+option java_outer_classname = "NamingProtos";
+
+import "validate/validate.proto";
+
+enum Colour {
+    COLOUR_UNSPECIFIED = 0;
+    RED = 1;
+    GREEN = 2;
+}
+
+message Leaf {
+    string label = 1 [(validate.rules).string.min_len = 1];
+}
+
+message Names {
+    message Nested {
+        int64 id = 1 [(validate.rules).int64.gte = 1];
+    }
+
+    string value = 1 [(validate.rules).string.min_len = 1];
+    bytes data = 2 [(validate.rules).bytes.max_len = 4];
+    int32 in = 3 [(validate.rules).int32.gt = 0];
+    string adapter = 4 [(validate.rules).string.max_len = 8];
+    string builder = 5 [(validate.rules).string.prefix = "b"];
+    string display_name = 6 [(validate.rules).string.min_len = 2];
+    Nested nested = 7;
+    Colour colour = 8 [(validate.rules).enum = {not_in: [2]}];
+    // Named like its type: Wire calls the property `golden_naming_Leaf`.
+    Leaf Leaf = 9 [(validate.rules).message.required = true];
+
+    // Named like locals the validator body declares.
+    repeated string violations = 10 [(validate.rules).repeated.max_items = 2];
+    Leaf result = 11;
+    oneof choice {
+        option (validate.required) = true;
+        string item = 12 [(validate.rules).string.min_len = 1];
+        Leaf index = 13;
+    }
+}

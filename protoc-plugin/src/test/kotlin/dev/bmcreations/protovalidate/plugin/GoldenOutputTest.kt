@@ -16,15 +16,17 @@ import java.io.File
  * what the generator writes arrives as a diff in review — which is how the
  * oneof `required` bug would have been visible.
  *
- * Regenerate after an intentional change:
+ * `golden/` holds the protobuf-java output and `golden-wire/` the `target=wire`
+ * output for the same fixtures. Regenerate both after an intentional change:
  *
  *     ./gradlew :protoc-plugin:test -PupdateGoldens
  */
 class GoldenOutputTest {
 
     private val goldenDir = File(System.getProperty("golden.dir"))
+    private val wireGoldenDir = File(System.getProperty("golden.wireDir"))
 
-    private fun generate(): Map<String, String> {
+    private fun generate(target: GeneratorTarget = GeneratorTarget.JAVA): Map<String, String> {
         val extractor = PgvRuleExtractor()
         val descriptorSet = File(System.getProperty("golden.descriptorSet"))
         val fileSet = descriptorSet.inputStream().use {
@@ -33,14 +35,21 @@ class GoldenOutputTest {
         val fixtures = fileSet.fileList.filter { it.name.startsWith("golden/") }.map { it.name }.toSet()
         assertTrue("no fixture protos in $descriptorSet", fixtures.isNotEmpty())
 
-        return PluginPipeline.generate(fileSet.fileList, fixtures, extractor)
+        return PluginPipeline.generate(fileSet.fileList, fixtures, extractor, target)
             .associate { it.name to it.content }
     }
 
     @Test
     fun `emitted output matches the goldens`() {
-        val generated = generate()
+        assertMatchesGoldens(generate(), goldenDir)
+    }
 
+    @Test
+    fun `wire output matches the wire goldens`() {
+        assertMatchesGoldens(generate(GeneratorTarget.WIRE), wireGoldenDir)
+    }
+
+    private fun assertMatchesGoldens(generated: Map<String, String>, goldenDir: File) {
         if (System.getProperty("golden.update") == "true") {
             goldenDir.deleteRecursively()
             generated.forEach { (name, content) ->

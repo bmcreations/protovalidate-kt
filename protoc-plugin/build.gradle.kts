@@ -44,6 +44,7 @@ tasks.named<Test>("test") {
         layout.buildDirectory.file("descriptors/golden.desc").get().asFile.path
     )
     systemProperty("golden.dir", file("src/test/resources/golden").path)
+    systemProperty("golden.wireDir", file("src/test/resources/golden-wire").path)
     // ./gradlew :protoc-plugin:test -PupdateGoldens rewrites the expected files.
     if (project.hasProperty("updateGoldens")) systemProperty("golden.update", "true")
 }
