@@ -50,12 +50,13 @@ object PluginPipeline {
         filesToGenerate: Set<String>,
         extractor: RuleExtractor,
         target: GeneratorTarget = GeneratorTarget.JAVA,
+        wireOptions: WireOptions = WireOptions(),
     ): List<CodeGeneratorResponse.File> {
         val validatedTypes = scanValidatedTypes(protoFiles, extractor)
         val knownTypes = if (target == GeneratorTarget.WIRE) scanTypeNames(protoFiles) else emptySet()
         return protoFiles
             .filter { it.name in filesToGenerate }
-            .flatMap { CodeGenerator.generate(it, validatedTypes, extractor, target, knownTypes) }
+            .flatMap { CodeGenerator.generate(it, validatedTypes, extractor, target, knownTypes, wireOptions) }
     }
 
     /** Fully-qualified names (no leading dot) of every message and enum in [protoFiles]. */

@@ -16,6 +16,7 @@ object CodeGenerator {
         extractor: RuleExtractor,
         target: GeneratorTarget = GeneratorTarget.JAVA,
         knownTypes: Set<String> = emptySet(),
+        wireOptions: WireOptions = WireOptions(),
     ): List<CodeGeneratorResponse.File> {
         val javaPackage = if (fileProto.options.hasJavaPackage()) {
             fileProto.options.javaPackage
@@ -45,7 +46,7 @@ object CodeGenerator {
             if (fileSyntax == FileSyntax.EDITIONS) {
                 throw PluginOptionException("target=wire does not support editions files (${fileProto.name})")
             }
-            WireSchema(fileProto.`package`, knownTypes)
+            WireSchema(fileProto.`package`, knownTypes, wireOptions.boxOneOfsMinSize)
         } else {
             null
         }
@@ -296,7 +297,7 @@ object CodeGenerator {
         )
 
         val style: AccessorStyle = if (wireSchema != null) {
-            WireAccessors(messageProto, fileSyntax, wireSchema)
+            WireAccessors(messageProto, fileSyntax, wireSchema, receiverType)
         } else {
             JavaAccessors
         }

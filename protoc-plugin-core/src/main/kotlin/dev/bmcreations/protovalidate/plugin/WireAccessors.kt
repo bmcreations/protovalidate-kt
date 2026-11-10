@@ -11,8 +11,31 @@ import com.google.protobuf.DescriptorProtos.FieldDescriptorProto.Type
  * @property protoPackage the proto `package` of the file declaring the message.
  * @property knownTypes fully-qualified names (no leading dot) of every message
  *   and enum in the request, for Wire's eponymous-type rule.
+ * @property boxOneOfsMinSize Wire's `boxOneOfsMinSize`; see [WireOptions].
  */
-data class WireSchema(val protoPackage: String, val knownTypes: Set<String>)
+data class WireSchema(
+    val protoPackage: String,
+    val knownTypes: Set<String>,
+    val boxOneOfsMinSize: Int = WireOptions.DEFAULT_BOX_ONEOFS_MIN_SIZE,
+)
+
+/**
+ * A oneof Wire generates as one `OneOf<Key, Value>?` property.
+ *
+ * @property property the message property holding the box.
+ * @property keys oneof member field name to the companion `OneOf.Key` constant
+ *   for that member.
+ */
+data class WireBox(val oneofName: String, val property: String, val keys: Map<String, String>)
+
+/**
+ * How Wire lays a message out as Kotlin properties.
+ *
+ * @property properties field name to property name, for every field that is
+ *   its own property (all but members of a [WireBox]).
+ * @property boxes oneof index to its box, for the oneofs Wire boxes.
+ */
+data class WireLayout(val properties: Map<String, String>, val boxes: Map<Int, WireBox>)
 
 /**
  * Property names Wire 7's Kotlin generator gives a message's fields, with its
@@ -45,7 +68,7 @@ internal object WireNames {
         "unknownFields", "ADAPTER", "adapter", "reader", "Builder", "builder", "MESSAGE_OPTIONS",
     )
 
-    fun propertyNames(message: DescriptorProto, schema: WireSchema): Map<String, String> {
+    fun layout(message: DescriptorProto, schema: WireSchema): WireLayout {
         val allocated = KOTLINPOET_KEYWORDS.toHashSet()
         fun newName(suggestion: String): String {
             var name = toJavaIdentifier(suggestion)
@@ -53,13 +76,46 @@ internal object WireNames {
             return name
         }
         WIRE_MEMBERS.forEach { newName(it) }
-        return message.fieldList.associate { field ->
+
+        val boxed = boxedOneofIndices(message, schema.boxOneOfsMinSize)
+        val properties = mutableMapOf<String, String>()
+        val boxes = mutableMapOf<Int, WireBox>()
+        // Wire allocates fields and boxes in source order, a box at its first member.
+        for (field in message.fieldList) {
+            val oneofIndex = if (field.hasOneofIndex() && !field.proto3Optional) field.oneofIndex else null
+            if (oneofIndex != null && oneofIndex in boxed) {
+                if (oneofIndex in boxes) continue
+                val oneofName = message.getOneofDecl(oneofIndex).name
+                val property = newName(oneofName)
+                newName(oneofName.replaceFirstChar(Char::titlecase)) // the Key class
+                newName("${property}_keys".uppercase())
+                val keys = message.fieldList
+                    .filter { it.hasOneofIndex() && it.oneofIndex == oneofIndex }
+                    .associate { it.name to newName("${oneofName}_${it.name}".uppercase()) }
+                boxes[oneofIndex] = WireBox(oneofName, property, keys)
+                continue
+            }
             val eponymous = field.name == wireTypeSimpleName(field) ||
                 qualified(schema.protoPackage, field.name) in schema.knownTypes
             val suggestion = if (eponymous) qualified(schema.protoPackage, field.name) else field.name
-            field.name to newName(suggestion)
+            properties[field.name] = newName(suggestion)
         }
+        return WireLayout(properties, boxes)
     }
+
+    /**
+     * Indices of the real oneofs with at least [minSize] members, which Wire
+     * boxes. A proto3 `optional` field's synthetic oneof is not a oneof to Wire.
+     */
+    private fun boxedOneofIndices(message: DescriptorProto, minSize: Int): Set<Int> = message.fieldList
+        .filter { it.hasOneofIndex() && !it.proto3Optional }
+        .groupingBy { it.oneofIndex }
+        .eachCount()
+        .filterValues { it >= minSize }
+        .keys
+
+    /** Whether [name] is a Kotlin keyword kotlinpoet would escape. */
+    fun isKeyword(name: String): Boolean = name in KOTLINPOET_KEYWORDS
 
     private fun qualified(pkg: String, name: String) = if (pkg.isEmpty()) name else "$pkg.$name"
 
@@ -84,7 +140,7 @@ internal object WireNames {
 }
 
 /**
- * Wire 7 Kotlin message classes, with flat (unboxed) oneofs.
+ * Wire 7 Kotlin message classes.
  *
  * Message fields, oneof members and fields with explicit presence are nullable
  * properties. Smart casts on a property declared in another module don't
@@ -92,29 +148,55 @@ internal object WireNames {
  * ([bindings]); every other read is `this.<property>`, which keeps a field named
  * like an emitter local (`violations`, `item`, …) from resolving to that local.
  *
- * One instance serves one message.
+ * A boxed oneof ([WireBox]) is one `OneOf<Key, Value>?` property. Its box is
+ * bound to a local, and each member read is bound to
+ * `box?.getOrNull(<Receiver>.<KEY>)`, the member's value when the box holds
+ * that member's key. Presence, the oneof case and `required` are read off the
+ * box.
+ *
+ * One instance serves one message, whose Kotlin type is [receiverType].
  */
 class WireAccessors(
     private val message: DescriptorProto,
     private val fileSyntax: FileSyntax,
     schema: WireSchema,
+    private val receiverType: String,
 ) : AccessorStyle {
 
-    private val propertyNames = WireNames.propertyNames(message, schema)
+    private val layout = WireNames.layout(message, schema)
+
+    /** Oneof index of each member of a boxed oneof, by field name. */
+    private val boxedMembers: Map<String, Int> = message.fieldList
+        .filter { it.hasOneofIndex() && !it.proto3Optional && it.oneofIndex in layout.boxes }
+        .associate { it.name to it.oneofIndex }
+
+    private val boxLocals = mutableMapOf<Int, String>()
 
     private val localNames: Map<String, String> = run {
         val taken = mutableSetOf<String>()
-        message.fieldList.filter { isNullable(it) }.associate { field ->
-            val property = propertyNames.getValue(field.name)
-            var local = if (property in EMITTER_IDENTIFIERS) "field_$property" else property
-            while (local in EMITTER_IDENTIFIERS || local in taken) local += "_"
+        fun allocate(suggestion: String): String {
+            var local = if (suggestion in EMITTER_IDENTIFIERS) "field_$suggestion" else suggestion
+            while (local in EMITTER_IDENTIFIERS || local in taken || WireNames.isKeyword(local)) local += "_"
             taken += local
+            return local
+        }
+        message.fieldList.filter { isNullable(it) }.associate { field ->
+            val oneofIndex = boxedMembers[field.name]
+            val local = if (oneofIndex != null) {
+                boxLocals.getOrPut(oneofIndex) { allocate(layout.boxes.getValue(oneofIndex).property) }
+                allocate(field.name.replace(Regex("""\W"""), "_"))
+            } else {
+                allocate(layout.properties.getValue(field.name))
+            }
             field.name to local
         }
     }
 
     /** Field names whose local [field] handed out, in first-use order. */
     private val requested = linkedSetOf<String>()
+
+    /** Boxed oneofs whose box local was handed out directly. */
+    private val requestedBoxes = mutableSetOf<Int>()
 
     private fun isNullable(field: FieldDescriptorProto): Boolean {
         if (field.label == Label.LABEL_REPEATED) return false
@@ -134,21 +216,54 @@ class WireAccessors(
         return local
     }
 
+    private fun boxLocal(oneofIndex: Int): String {
+        requestedBoxes += oneofIndex
+        return boxLocals.getValue(oneofIndex)
+    }
+
     /**
      * `val x = this.x` lines for the nullable fields [body] reads, in field
      * declaration order. A local is counted as read when it appears as a bare
-     * identifier, not inside a field-path string or after a `.`.
+     * identifier, not inside a field-path string or after a `.`. A boxed
+     * member's binding reads its box, so the box is bound before its first
+     * member.
      */
-    fun bindings(body: String): List<String> = message.fieldList
-        .filter { it.name in requested }
-        .mapNotNull { field ->
+    fun bindings(body: String): List<String> {
+        fun reads(local: String) =
+            Regex("""(?<![\w"$.])${Regex.escape(local)}(?!\w)""").containsMatchIn(body)
+
+        val readMembers = message.fieldList
+            .filter { it.name in requested && reads(localNames.getValue(it.name)) }
+            .map { it.name }
+            .toSet()
+        val readBoxes = layout.boxes.keys.filter { index ->
+            (index in requestedBoxes && reads(boxLocals.getValue(index))) ||
+                readMembers.any { boxedMembers[it] == index }
+        }.toSet()
+
+        val lines = mutableListOf<String>()
+        val boundBoxes = mutableSetOf<Int>()
+        for (field in message.fieldList) {
+            val oneofIndex = boxedMembers[field.name]
+            if (oneofIndex != null && oneofIndex in readBoxes && boundBoxes.add(oneofIndex)) {
+                lines += "val ${boxLocals.getValue(oneofIndex)} = this.${layout.boxes.getValue(oneofIndex).property}"
+            }
+            if (field.name !in readMembers) continue
             val local = localNames.getValue(field.name)
-            val read = Regex("""(?<![\w"$.])${Regex.escape(local)}(?!\w)""").containsMatchIn(body)
-            if (read) "val $local = this.${propertyNames.getValue(field.name)}" else null
+            lines += if (oneofIndex != null) {
+                "val $local = ${boxLocals.getValue(oneofIndex)}?.getOrNull(${keyConstant(oneofIndex, field)})"
+            } else {
+                "val $local = this.${layout.properties.getValue(field.name)}"
+            }
         }
+        return lines
+    }
+
+    private fun keyConstant(oneofIndex: Int, member: FieldDescriptorProto): String =
+        "$receiverType.${layout.boxes.getValue(oneofIndex).keys.getValue(member.name)}"
 
     override fun field(field: FieldDescriptorProto): String =
-        if (field.name in localNames) local(field) else "this.${propertyNames.getValue(field.name)}"
+        if (field.name in localNames) local(field) else "this.${layout.properties.getValue(field.name)}"
 
     override fun has(field: FieldDescriptorProto): String =
         if (field.name in localNames) "${local(field)} != null" else "true"
@@ -184,11 +299,17 @@ class WireAccessors(
     override fun fieldMaskPaths(accessor: String): String =
         throw PluginOptionException("target=wire does not support field_mask rules")
 
-    override fun oneofCaseIs(receiverType: String, oneofName: String, member: FieldDescriptorProto): String =
-        "${local(member)} != null"
+    override fun oneofCaseIs(receiverType: String, oneofName: String, member: FieldDescriptorProto): String {
+        val oneofIndex = boxedMembers[member.name]
+            ?: return "${local(member)} != null"
+        return "${boxLocal(oneofIndex)}?.key == ${keyConstant(oneofIndex, member)}"
+    }
 
-    override fun oneofNotSet(receiverType: String, oneofName: String, members: List<FieldDescriptorProto>): String =
-        members.joinToString(" && ") { "${local(it)} == null" }
+    override fun oneofNotSet(receiverType: String, oneofName: String, members: List<FieldDescriptorProto>): String {
+        val oneofIndex = members.firstNotNullOfOrNull { boxedMembers[it.name] }
+            ?: return members.joinToString(" && ") { "${local(it)} == null" }
+        return "${boxLocal(oneofIndex)} == null"
+    }
 
     private companion object {
         /** Names the emitted function body declares or resolves unqualified. */
