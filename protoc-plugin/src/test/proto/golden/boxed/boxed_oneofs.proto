@@ -55,3 +55,12 @@ message BoxedNames {
 
     Nested nested = 3;
 }
+
+// Wire renames a oneof named after a Kotlin keyword (`inner_`), and its keys
+// follow the original name.
+message BoxedKeyword {
+    oneof inner {
+        string a = 1 [(validate.rules).string.min_len = 1];
+        int64 b = 2 [(validate.rules).int64.lt = 5];
+    }
+}
