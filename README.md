@@ -15,6 +15,7 @@ Generates Kotlin validation functions from protobuf constraint annotations at co
 | `gradle-plugin` | Gradle plugin that wires everything together for consumers |
 | `conformance` | Buf protovalidate conformance test executor |
 | `pgv-conformance` | PGV conformance test executor |
+| `pgv-conformance-wire` | PGV conformance test executor for Wire messages (`target=wire`) |
 
 ## Setup
 
@@ -232,7 +233,7 @@ generated code differs to match:
 
 ## Building
 
-Requires JDK 21+.
+Requires JDK 17+.
 
 ```bash
 ./gradlew build
