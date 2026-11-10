@@ -2,13 +2,44 @@ package dev.bmcreations.protovalidate
 
 object DurationValidators {
 
+    private const val NANOS_PER_SECOND = 1_000_000_000L
+
+    /**
+     * Compares two (seconds, nanos) pairs by the instant or length they denote.
+     *
+     * Protobuf normalises with truncated seconds and same-sign nanos (-1.5s is
+     * seconds -1, nanos -500000000); Wire floors the seconds and keeps nanos
+     * non-negative (seconds -2, nanos 500000000). Both are reduced to the floored
+     * form before comparing, so either may be passed on either side.
+     */
     internal fun compareDuration(aSeconds: Long, aNanos: Int, bSeconds: Long, bNanos: Int): Int {
-        val secCmp = aSeconds.compareTo(bSeconds)
-        return if (secCmp != 0) secCmp else aNanos.compareTo(bNanos)
+        val aSec = aSeconds + aNanos.toLong().floorDiv(NANOS_PER_SECOND)
+        val bSec = bSeconds + bNanos.toLong().floorDiv(NANOS_PER_SECOND)
+        val secCmp = aSec.compareTo(bSec)
+        if (secCmp != 0) return secCmp
+        return aNanos.toLong().mod(NANOS_PER_SECOND).compareTo(bNanos.toLong().mod(NANOS_PER_SECOND))
     }
 
+    /**
+     * Formats a duration as protobuf JSON does (`1.5s`, `-0.25s`), whatever sign
+     * convention [seconds] and [nanos] use. The sign comes from the whole value.
+     */
     internal fun formatDuration(seconds: Long, nanos: Int): String {
-        return if (nanos == 0) "${seconds}s" else "${seconds}.${"%09d".format(nanos).trimEnd('0')}s"
+        // Move to truncated seconds with same-sign nanos, |nanos| < 1e9.
+        var sec = seconds + nanos / NANOS_PER_SECOND
+        var nan = nanos % NANOS_PER_SECOND
+        if (sec > 0 && nan < 0) {
+            sec -= 1
+            nan += NANOS_PER_SECOND
+        } else if (sec < 0 && nan > 0) {
+            sec += 1
+            nan -= NANOS_PER_SECOND
+        }
+        if (nan == 0L) return "${sec}s"
+        val negative = sec < 0 || nan < 0
+        val absSec = sec.toString().removePrefix("-")
+        val frac = (if (nan < 0) -nan else nan).toString().padStart(9, '0').trimEnd('0')
+        return "${if (negative) "-" else ""}$absSec.${frac}s"
     }
 
     fun checkRequired(hasField: Boolean, field: String): FieldViolation? {
