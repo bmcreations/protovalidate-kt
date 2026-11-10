@@ -14,6 +14,8 @@ fun Names.validate(): ValidationResult {
     val field_result = this.result
     val field_item = this.item
     val field_index = this.index
+    val nickname = this.nickname
+    val count = this.count
     if (field_item == null && field_index == null) {
         violations += FieldViolation("choice", "required", "exactly one field is required in oneof")
     }
@@ -38,6 +40,13 @@ fun Names.validate(): ValidationResult {
             Validators.checkStringMinLen(field_item, 1L, "item")?.let { violations += it }
         }
     }
+    if (nickname != null) {
+        Validators.checkStringMinLen(nickname, 1L, "nickname")?.let { violations += it }
+    }
+    if (count != null) {
+        Validators.checkGt(count, 0, "count", "int32.gt")?.let { violations += it }
+    }
+    Validators.checkStringMaxLen(this.golden_naming_Colour, 3L, "Colour")?.let { violations += it }
     if (nested != null) {
         nested.validate().let { result ->
             if (result is ValidationResult.Invalid) {

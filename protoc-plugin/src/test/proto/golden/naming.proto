@@ -47,4 +47,10 @@ message Names {
         string item = 12 [(validate.rules).string.min_len = 1];
         Leaf index = 13;
     }
+
+    // proto3 optional: nullable in Wire, checked only when set.
+    optional string nickname = 14 [(validate.rules).string.min_len = 1];
+    optional int32 count = 15 [(validate.rules).int32.gt = 0];
+    // Named like another type in the package, not its own: Wire still qualifies it.
+    string Colour = 16 [(validate.rules).string.max_len = 3];
 }

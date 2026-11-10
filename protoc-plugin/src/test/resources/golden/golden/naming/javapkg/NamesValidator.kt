@@ -31,6 +31,13 @@ fun NamingProtos.Names.validate(): ValidationResult {
             Validators.checkStringMinLen(item, 1L, "item")?.let { violations += it }
         }
     }
+    if (hasNickname()) {
+        Validators.checkStringMinLen(nickname, 1L, "nickname")?.let { violations += it }
+    }
+    if (hasCount()) {
+        Validators.checkGt(count, 0, "count", "int32.gt")?.let { violations += it }
+    }
+    Validators.checkStringMaxLen(colour, 3L, "Colour")?.let { violations += it }
     if (hasNested()) {
         nested.validate().let { result ->
             if (result is ValidationResult.Invalid) {
