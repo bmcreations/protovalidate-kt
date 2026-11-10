@@ -1,7 +1,5 @@
 package dev.bmcreations.protovalidate
 
-import java.net.InetAddress
-
 // ── RFC 4291 IPv6 parser (no InetAddress, supports embedded IPv4) ──
 
 /**
@@ -40,12 +38,74 @@ private fun parseIpv6Strict(value: String): Boolean {
         // The IPv4 tail must be a valid dotted-decimal address.
         if (!isStrictIpv4Bare(possibleIpv4)) return false
         // Everything before the last ':' is the IPv6 prefix, which must supply 6 groups worth
-        // of 16-bit values (the IPv4 takes the last 2 slots → 32 bits).
-        val ipv6Prefix = value.substring(0, lastColonIdx)
+        // of 16-bit values (the IPv4 takes the last 2 slots → 32 bits). When the IPv4 tail
+        // follows "::" directly (`::1.2.3.4`), keep the whole "::" in the prefix.
+        val ipv6Prefix = ipv6PrefixBeforeIpv4(value, lastColonIdx)
         validateIpv6Groups(ipv6Prefix, hasDC, expectedGroups = 6)
     } else {
         validateIpv6Groups(value, hasDC, expectedGroups = 8)
     }
+}
+
+/**
+ * Returns the part of [value] before an embedded IPv4 tail that starts after [lastColonIdx].
+ * The separating ':' is dropped unless it is the second half of "::".
+ */
+private fun ipv6PrefixBeforeIpv4(value: String, lastColonIdx: Int): String {
+    val withColon = value.substring(0, lastColonIdx + 1)
+    return if (withColon.endsWith("::")) withColon else value.substring(0, lastColonIdx)
+}
+
+/**
+ * Converts an address that already passed [StringValidators.isStrictIpv4] or
+ * [StringValidators.isStrictIpv6] into its network-order bytes: 4 for IPv4, 16 for
+ * IPv6 (IPv4-mapped and IPv4-compatible forms included). Returns null otherwise.
+ */
+private fun ipAddressBytes(ip: String): ByteArray? {
+    if (isStrictIpv4Bare(ip)) return ipv4Bytes(ip)
+    if (!parseIpv6Strict(ip)) return null
+
+    val lastColonIdx = ip.lastIndexOf(':')
+    val last = ip.substring(lastColonIdx + 1)
+    val groups = ArrayList<Int>(8)
+    val head: String
+    val tail = ArrayList<Int>(2)
+    if (looksLikeIpv4(last)) {
+        val v4 = ipv4Bytes(last) ?: return null
+        tail += ((v4[0].toInt() and 0xFF) shl 8) or (v4[1].toInt() and 0xFF)
+        tail += ((v4[2].toInt() and 0xFF) shl 8) or (v4[3].toInt() and 0xFF)
+        head = ipv6PrefixBeforeIpv4(ip, lastColonIdx)
+    } else {
+        head = ip
+    }
+
+    val dcIdx = head.indexOf("::")
+    if (dcIdx >= 0) {
+        val left = head.substring(0, dcIdx).let { if (it.isEmpty()) emptyList() else it.split(":") }
+        val right = head.substring(dcIdx + 2).let { if (it.isEmpty()) emptyList() else it.split(":") }
+        val explicit = left.size + right.size + tail.size
+        if (explicit >= 8) return null
+        left.mapTo(groups) { it.toInt(16) }
+        repeat(8 - explicit) { groups += 0 }
+        right.mapTo(groups) { it.toInt(16) }
+    } else {
+        head.split(":").mapTo(groups) { it.toInt(16) }
+    }
+    groups += tail
+    if (groups.size != 8) return null
+
+    val bytes = ByteArray(16)
+    for ((i, g) in groups.withIndex()) {
+        bytes[2 * i] = (g shr 8).toByte()
+        bytes[2 * i + 1] = g.toByte()
+    }
+    return bytes
+}
+
+private fun ipv4Bytes(value: String): ByteArray? {
+    if (!isStrictIpv4Bare(value)) return null
+    val parts = value.split(".")
+    return ByteArray(4) { parts[it].toInt().toByte() }
 }
 
 /** Returns true if the string looks like it could be an IPv4 address (contains a dot). */
@@ -136,21 +196,21 @@ object StringValidators {
     }
 
     fun checkMinBytes(value: String, min: Long, field: String): FieldViolation? {
-        if (value.toByteArray(Charsets.UTF_8).size.toLong() < min) {
+        if (value.encodeToByteArray().size.toLong() < min) {
             return FieldViolation(field, "string.min_bytes", "must be at least $min bytes")
         }
         return null
     }
 
     fun checkMaxBytes(value: String, max: Long, field: String): FieldViolation? {
-        if (value.toByteArray(Charsets.UTF_8).size.toLong() > max) {
+        if (value.encodeToByteArray().size.toLong() > max) {
             return FieldViolation(field, "string.max_bytes", "must be at most $max bytes")
         }
         return null
     }
 
     fun checkLenBytes(value: String, len: Long, field: String): FieldViolation? {
-        if (value.toByteArray(Charsets.UTF_8).size.toLong() != len) {
+        if (value.encodeToByteArray().size.toLong() != len) {
             return FieldViolation(field, "string.len_bytes", "must be exactly $len bytes")
         }
         return null
@@ -562,11 +622,9 @@ object StringValidators {
     /** Returns true if the byte array is a valid UTF-8 byte sequence. */
     private fun isValidUtf8Bytes(bytes: List<Byte>): Boolean {
         return try {
-            val arr = bytes.toByteArray()
-            val decoded = String(arr, Charsets.UTF_8)
-            // Re-encode and compare to detect replacement characters from lenient decode
-            decoded.toByteArray(Charsets.UTF_8).contentEquals(arr)
-        } catch (_: Exception) {
+            bytes.toByteArray().decodeToString(throwOnInvalidSequence = true)
+            true
+        } catch (_: CharacterCodingException) {
             false
         }
     }
@@ -1145,7 +1203,7 @@ object StringValidators {
      * - Supports embedded IPv4 in the last two groups (e.g. `::ffff:192.168.1.1`)
      * - Each hex group is at most 4 digits (rejects `::0000ffff`)
      *
-     * Uses [parseIpv6Strict] — does NOT rely on [InetAddress.getByName].
+     * Uses [parseIpv6Strict].
      */
     fun isStrictIpv6(value: String): Boolean {
         if (value.isEmpty()) return false
@@ -1240,31 +1298,16 @@ object StringValidators {
      * i.e. it is a valid network address.
      */
     private fun isNetworkAddress(ip: String, prefixLen: Int, maxLen: Int): Boolean {
-        return try {
-            val addr = InetAddress.getByName(ip)
-            val rawBytes = addr.address
-            // If we expect 128 bits (IPv6) but got 4 bytes (Java resolved IPv4-mapped to Inet4Address),
-            // reconstruct the full 16-byte IPv6 representation: ::ffff:<4 bytes>
-            val bytes = if (maxLen == 128 && rawBytes.size == 4) {
-                ByteArray(16).also { full ->
-                    full[10] = 0xFF.toByte()
-                    full[11] = 0xFF.toByte()
-                    rawBytes.copyInto(full, 12)
-                }
-            } else {
-                rawBytes
+        val bytes = ipAddressBytes(ip) ?: return false
+        if (bytes.size * 8 != maxLen) return false
+        // For each bit position >= prefixLen, it must be 0
+        for (bit in prefixLen until maxLen) {
+            val byteIdx = bit / 8
+            val bitIdx = 7 - (bit % 8)
+            if ((bytes[byteIdx].toInt() shr bitIdx) and 1 != 0) {
+                return false
             }
-            // For each bit position >= prefixLen, it must be 0
-            for (bit in prefixLen until maxLen) {
-                val byteIdx = bit / 8
-                val bitIdx = 7 - (bit % 8)
-                if (byteIdx < bytes.size && (bytes[byteIdx].toInt() shr bitIdx) and 1 != 0) {
-                    return false
-                }
-            }
-            true
-        } catch (_: Exception) {
-            false
         }
+        return true
     }
 }
