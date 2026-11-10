@@ -13,6 +13,7 @@ class ProtovalidatePlugin : Plugin<Project> {
             ProtovalidateExtension::class.java,
         )
         ext.variant.convention(ProtoVariant.BUF)
+        ext.target.convention(MessageTarget.JAVA)
 
         project.pluginManager.withPlugin("com.google.protobuf") {
             configureProtobuf(project, ext)
@@ -74,6 +75,13 @@ class ProtovalidatePlugin : Plugin<Project> {
         // run during afterEvaluate, so the variant property is resolved by then.
         protobuf.generateProtoTasks {
             val variant = ext.variant.get()
+            val target = ext.target.get()
+            if (target == MessageTarget.WIRE && variant != ProtoVariant.PGV) {
+                error(
+                    "protovalidate: target = WIRE supports PGV rules only; " +
+                        "set variant.set(ProtoVariant.PGV)."
+                )
+            }
             val pluginName = when (variant) {
                 ProtoVariant.BUF -> "validate-kt-buf"
                 ProtoVariant.PGV -> "validate-kt"
@@ -83,7 +91,19 @@ class ProtovalidatePlugin : Plugin<Project> {
                 task.dependsOn(setupTrampolines)
 
                 task.plugins { plugins ->
-                    plugins.create(pluginName)
+                    plugins.create(pluginName) { options ->
+                        if (target == MessageTarget.WIRE) options.option("target=wire")
+                    }
+                }
+
+                // Wire's plugin generates the message classes; protobuf-java's
+                // would clash with them by name.
+                if (target == MessageTarget.WIRE) {
+                    task.builtins { builtins ->
+                        listOf("kotlin", "java").forEach { name ->
+                            builtins.findByName(name)?.let(builtins::remove)
+                        }
+                    }
                 }
 
                 // PGV protos import validate/validate.proto — extract the bundled

@@ -44,6 +44,42 @@ protovalidate {
 }
 ```
 
+### Wire messages
+
+With PGV rules, the validators can target [Wire](https://github.com/square/wire)
+7.x Kotlin classes instead of protobuf-java. Generate the messages with Wire's
+Gradle plugin and select the Wire target:
+
+```kotlin
+import dev.bmcreations.protovalidate.gradle.MessageTarget
+import dev.bmcreations.protovalidate.gradle.ProtoVariant
+
+protovalidate {
+    variant.set(ProtoVariant.PGV)
+    target.set(MessageTarget.WIRE)
+}
+```
+
+The plugin then passes `target=wire` to `protoc-gen-validate-kt` and removes
+protobuf-java's `java` and `kotlin` builtins from the generate tasks, since
+those classes would clash with Wire's. Without the Gradle plugin, pass the
+option to protoc directly: `--validate-kt_out=target=wire:<dir>`. The default
+is `target=java`; any other value fails the run.
+
+The generated `validate()` has the same name and return type in both modes. In
+Wire mode it uses only common Kotlin APIs, so it compiles in a KMP `commonMain`
+(the `pgv-conformance-wire` module builds it for jvm and js). The Gradle plugin
+wires generation into a JVM source set only; for a KMP module, run protoc
+yourself and add the output directory to `commonMain`, as
+`pgv-conformance-wire/build.gradle.kts` does.
+
+Limits of Wire mode:
+- PGV only. `protoc-gen-validate-kt-buf` rejects `target=wire`.
+- `enum.defined_only` can't be checked: Wire drops unknown enum values into
+  `unknownFields` on decode (and throws for unknown enum map values).
+- Generated files follow Wire's package choice (`java_package`, else the proto
+  `package`). `wire_package` is not supported.
+
 ### buf validate (recommended)
 
 [buf validate](https://github.com/bufbuild/protovalidate) is the actively-maintained successor to PGV. Protos use `buf.validate` annotations:
@@ -155,6 +191,18 @@ CI check the same corpus.
 ./gradlew :pgv-conformance:jar
 ./pgv-conformance/run-conformance.sh
 ```
+
+The same harness against Wire messages and `target=wire` validators:
+
+```bash
+./gradlew :pgv-conformance-wire:executorJar
+./pgv-conformance-wire/run-conformance.sh
+```
+
+It passes 1061/1070. The 9 failures are the `defined_only` cases that Wire's
+decoder makes unobservable. `./gradlew :pgv-conformance-wire:check` asserts that
+both targets generate the same validator files, so a misnamed Wire validator
+can't turn into a silent pass.
 
 Every message in the vendored harness protos has to be the subject of at least
 one case. CI enforces that:

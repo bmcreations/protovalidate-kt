@@ -12,6 +12,25 @@ enum class ProtoVariant {
     PGV,
 }
 
+/**
+ * Which generated message classes the validators are written against.
+ */
+enum class MessageTarget {
+    /** protobuf-java classes (`hasX()`, `getXList()`, oneof case enums). */
+    JAVA,
+
+    /**
+     * Wire 7.x Kotlin classes (nullable properties, no outer class). Requires
+     * [ProtoVariant.PGV]. The message classes come from Wire's own Gradle
+     * plugin, so protobuf-java's `java` and `kotlin` builtins are removed from
+     * the generate tasks.
+     */
+    WIRE,
+}
+
 interface ProtovalidateExtension {
     val variant: Property<ProtoVariant>
+
+    /** Defaults to [MessageTarget.JAVA]. Passed to the protoc plugin as `target=`. */
+    val target: Property<MessageTarget>
 }
