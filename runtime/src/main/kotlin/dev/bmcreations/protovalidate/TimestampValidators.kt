@@ -1,14 +1,13 @@
 package dev.bmcreations.protovalidate
 
-import java.time.Instant
-import java.time.format.DateTimeFormatter
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 object TimestampValidators {
 
-    private fun formatRfc3339(seconds: Long, nanos: Int): String {
-        val instant = Instant.ofEpochSecond(seconds, nanos.toLong())
-        return DateTimeFormatter.ISO_INSTANT.format(instant)
-    }
+    /** RFC 3339 in UTC, fraction in groups of three digits, as `java.time`'s ISO_INSTANT prints it. */
+    private fun formatRfc3339(seconds: Long, nanos: Int): String =
+        Instant.fromEpochSeconds(seconds, nanos).toString()
 
     fun checkRequired(hasField: Boolean, field: String): FieldViolation? {
         if (!hasField) {
@@ -53,7 +52,7 @@ object TimestampValidators {
     }
 
     fun checkLtNow(seconds: Long, nanos: Int, field: String): FieldViolation? {
-        val nowMillis = System.currentTimeMillis()
+        val nowMillis = Clock.System.now().toEpochMilliseconds()
         val nowSeconds = nowMillis / 1000L
         val nowNanos = ((nowMillis % 1000L) * 1_000_000L).toInt()
         if (DurationValidators.compareDuration(seconds, nanos, nowSeconds, nowNanos) >= 0) {
@@ -63,7 +62,7 @@ object TimestampValidators {
     }
 
     fun checkGtNow(seconds: Long, nanos: Int, field: String): FieldViolation? {
-        val nowMillis = System.currentTimeMillis()
+        val nowMillis = Clock.System.now().toEpochMilliseconds()
         val nowSeconds = nowMillis / 1000L
         val nowNanos = ((nowMillis % 1000L) * 1_000_000L).toInt()
         if (DurationValidators.compareDuration(seconds, nanos, nowSeconds, nowNanos) <= 0) {
@@ -73,7 +72,7 @@ object TimestampValidators {
     }
 
     fun checkWithin(seconds: Long, nanos: Int, withinSeconds: Long, withinNanos: Int, field: String): FieldViolation? {
-        val nowMillis = System.currentTimeMillis()
+        val nowMillis = Clock.System.now().toEpochMilliseconds()
         val nowSeconds = nowMillis / 1000L
         val nowNanos = ((nowMillis % 1000L) * 1_000_000L).toInt()
         val diffTotalNanos: Long = run {

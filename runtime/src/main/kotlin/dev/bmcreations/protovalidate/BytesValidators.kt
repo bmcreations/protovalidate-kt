@@ -25,7 +25,7 @@ object BytesValidators {
 
     fun checkConst(value: ByteArray, expected: ByteArray, field: String): FieldViolation? {
         if (!value.contentEquals(expected)) {
-            val hex = expected.joinToString("") { String.format("%02x", it.toInt() and 0xFF) }
+            val hex = expected.joinToString("") { (it.toInt() and 0xFF).toString(16).padStart(2, '0') }
             return FieldViolation(field, "bytes.const", "must be $hex")
         }
         return null
@@ -33,12 +33,9 @@ object BytesValidators {
 
     fun checkPattern(value: ByteArray, pattern: String, field: String): FieldViolation? {
         // Check if the bytes are valid UTF-8 before applying regex
-        val decoder = Charsets.UTF_8.newDecoder()
-            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
         val str = try {
-            decoder.decode(java.nio.ByteBuffer.wrap(value)).toString()
-        } catch (_: java.nio.charset.CharacterCodingException) {
+            value.decodeToString(throwOnInvalidSequence = true)
+        } catch (_: CharacterCodingException) {
             throw RuntimeException("must be valid UTF-8 to apply regexp")
         }
         if (!Regex(pattern).containsMatchIn(str)) {
