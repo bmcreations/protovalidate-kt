@@ -61,3 +61,9 @@ jobs:
 
       - name: Run PGV conformance tests (Wire)
         run: ./pgv-conformance-wire/run-conformance.sh
+
+      - name: Build Wire conformance JAR (boxed oneofs)
+        run: ./gradlew :pgv-conformance-wire:executorJar :pgv-conformance-wire:check -PwireBoxOneOfsMinSize=1
+
+      - name: Run PGV conformance tests (Wire, boxed oneofs)
+        run: ./pgv-conformance-wire/run-conformance.sh

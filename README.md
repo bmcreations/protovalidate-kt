@@ -73,12 +73,24 @@ wires generation into a JVM source set only; for a KMP module, run protoc
 yourself and add the output directory to `commonMain`, as
 `pgv-conformance-wire/build.gradle.kts` does.
 
+If Wire boxes oneofs (`boxOneOfsMinSize` in its `kotlin {}` block), pass the
+same value as `wire_box_oneofs_min_size`:
+`--validate-kt_out=target=wire,wire_box_oneofs_min_size=8:<dir>`. Oneofs with at
+least that many members are then read through Wire's `OneOf<Key, Value>?`
+property, and smaller ones stay one nullable property per member. The value has
+to match Wire's, or the validators won't compile. Like Wire, the default is
+5000. Protoc fails the run when the option is given without `target=wire`, on
+`protoc-gen-validate-kt-buf`, or with a value that isn't a positive integer.
+The Gradle plugin doesn't set the option yet.
+
+Generated files follow Wire's package choice: `(wire.wire_package)`, else
+`java_package`, else the proto `package`.
+
 Limits of Wire mode:
 - PGV only. `protoc-gen-validate-kt-buf` rejects `target=wire`.
 - `enum.defined_only` can't be checked: Wire drops unknown enum values into
-  `unknownFields` on decode (and throws for unknown enum map values).
-- Generated files follow Wire's package choice (`java_package`, else the proto
-  `package`). `wire_package` is not supported.
+  `unknownFields` on decode (and throws for unknown enum map values, and for
+  unknown enum values in a boxed oneof).
 
 ### buf validate (recommended)
 
@@ -200,7 +212,16 @@ The same harness against Wire messages and `target=wire` validators:
 ```
 
 It passes 1061/1070. The 9 failures are the `defined_only` cases that Wire's
-decoder makes unobservable. `./gradlew :pgv-conformance-wire:check` asserts that
+decoder makes unobservable, listed in `pgv-conformance-wire/expected-failures.txt`.
+To run it with boxed oneofs, build with `-PwireBoxOneOfsMinSize=N`, which sets
+both Wire's `boxOneOfsMinSize` and `wire_box_oneofs_min_size` for the harness:
+
+```bash
+./gradlew :pgv-conformance-wire:executorJar -PwireBoxOneOfsMinSize=1
+./pgv-conformance-wire/run-conformance.sh
+```
+
+With N=1 every harness oneof is boxed, and the same 9 cases fail. `./gradlew :pgv-conformance-wire:check` asserts that
 both targets generate the same validator files, so a misnamed Wire validator
 can't turn into a silent pass.
 
