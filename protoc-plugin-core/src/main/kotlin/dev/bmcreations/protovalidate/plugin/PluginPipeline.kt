@@ -18,21 +18,18 @@ object PluginPipeline {
 
     /**
      * Maps the fully-qualified proto name of every message carrying validation
-     * rules to the Java package its validator belongs in. Generation needs this
+     * rules to the package its validator belongs in (see [kotlinPackage]). Generation needs this
      * across all files in the request, not just the ones being generated, so a
      * validator can call into a validator for a type declared elsewhere.
      */
     fun scanValidatedTypes(
         protoFiles: List<FileDescriptorProto>,
-        extractor: RuleExtractor
+        extractor: RuleExtractor,
+        target: GeneratorTarget = GeneratorTarget.JAVA,
     ): Map<String, String> {
         val result = mutableMapOf<String, String>()
         for (fileProto in protoFiles) {
-            val javaPackage = if (fileProto.options.hasJavaPackage()) {
-                fileProto.options.javaPackage
-            } else {
-                fileProto.`package`
-            }
+            val javaPackage = kotlinPackage(fileProto, target)
             val protoPackage = fileProto.`package`
             val prefix = if (protoPackage.isEmpty()) "." else ".$protoPackage."
 
@@ -52,7 +49,7 @@ object PluginPipeline {
         target: GeneratorTarget = GeneratorTarget.JAVA,
         wireOptions: WireOptions = WireOptions(),
     ): List<CodeGeneratorResponse.File> {
-        val validatedTypes = scanValidatedTypes(protoFiles, extractor)
+        val validatedTypes = scanValidatedTypes(protoFiles, extractor, target)
         val knownTypes = if (target == GeneratorTarget.WIRE) scanTypeNames(protoFiles) else emptySet()
         return protoFiles
             .filter { it.name in filesToGenerate }

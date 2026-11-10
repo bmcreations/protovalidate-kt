@@ -18,11 +18,7 @@ object CodeGenerator {
         knownTypes: Set<String> = emptySet(),
         wireOptions: WireOptions = WireOptions(),
     ): List<CodeGeneratorResponse.File> {
-        val javaPackage = if (fileProto.options.hasJavaPackage()) {
-            fileProto.options.javaPackage
-        } else {
-            fileProto.`package`
-        }
+        val javaPackage = kotlinPackage(fileProto, target)
 
         // Wire has no outer class: every message is a class in the package itself.
         val javaMultipleFiles = fileProto.options.javaMultipleFiles || target == GeneratorTarget.WIRE
