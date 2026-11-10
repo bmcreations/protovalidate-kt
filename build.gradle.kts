@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") apply false
+    kotlin("multiplatform") apply false
     id("com.vanniktech.maven.publish") apply false
 }
 

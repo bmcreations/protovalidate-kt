@@ -108,6 +108,20 @@ private fun ipv4Bytes(value: String): ByteArray? {
     return ByteArray(4) { parts[it].toInt().toByte() }
 }
 
+/**
+ * Counts code points the way `java.lang.String.codePointCount` does: a valid
+ * surrogate pair is one code point, an unpaired surrogate is one on its own.
+ */
+private fun codePointCount(value: String): Int {
+    var count = 0
+    var i = 0
+    while (i < value.length) {
+        if (value[i].isHighSurrogate() && i + 1 < value.length && value[i + 1].isLowSurrogate()) i += 2 else i++
+        count++
+    }
+    return count
+}
+
 /** Returns true if the string looks like it could be an IPv4 address (contains a dot). */
 private fun looksLikeIpv4(s: String): Boolean = s.contains('.')
 
@@ -172,7 +186,7 @@ object StringValidators {
     }
 
     fun checkMinLen(value: String, min: Long, field: String): FieldViolation? {
-        val count = value.codePointCount(0, value.length).toLong()
+        val count = codePointCount(value).toLong()
         if (count < min) {
             return FieldViolation(field, "string.min_len", "must be at least $min characters")
         }
@@ -180,7 +194,7 @@ object StringValidators {
     }
 
     fun checkMaxLen(value: String, max: Long, field: String): FieldViolation? {
-        val count = value.codePointCount(0, value.length).toLong()
+        val count = codePointCount(value).toLong()
         if (count > max) {
             return FieldViolation(field, "string.max_len", "must be at most $max characters")
         }
@@ -188,7 +202,7 @@ object StringValidators {
     }
 
     fun checkLen(value: String, len: Long, field: String): FieldViolation? {
-        val count = value.codePointCount(0, value.length).toLong()
+        val count = codePointCount(value).toLong()
         if (count != len) {
             return FieldViolation(field, "string.len", "must be exactly $len characters")
         }

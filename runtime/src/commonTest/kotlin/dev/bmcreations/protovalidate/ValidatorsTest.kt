@@ -1,9 +1,10 @@
 package dev.bmcreations.protovalidate
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.Test
+import kotlin.time.Clock
 
 class ValidatorsTest {
 
@@ -318,12 +319,12 @@ class ValidatorsTest {
 
     @Test
     fun `bytes pattern - valid regex match on UTF-8 string`() {
-        assertNull(Validators.checkBytesPattern("hello".toByteArray(), "^hell", "value"))
+        assertNull(Validators.checkBytesPattern("hello".encodeToByteArray(), "^hell", "value"))
     }
 
     @Test
     fun `bytes pattern - invalid`() {
-        assertNotNull(Validators.checkBytesPattern("goodbye".toByteArray(), "^hell", "value"))
+        assertNotNull(Validators.checkBytesPattern("goodbye".encodeToByteArray(), "^hell", "value"))
     }
 
     // ── Bytes Prefix ──
@@ -722,7 +723,7 @@ class ValidatorsTest {
 
     @Test
     fun `timestamp lt now - invalid future timestamp`() {
-        val futureSeconds = System.currentTimeMillis() / 1000L + 100_000L
+        val futureSeconds = Clock.System.now().toEpochMilliseconds() / 1000L + 100_000L
         assertNotNull(Validators.checkTimestampLtNow(futureSeconds, 0, "value"))
     }
 
@@ -730,7 +731,7 @@ class ValidatorsTest {
 
     @Test
     fun `timestamp gt now - valid future timestamp`() {
-        val futureSeconds = System.currentTimeMillis() / 1000L + 100_000L
+        val futureSeconds = Clock.System.now().toEpochMilliseconds() / 1000L + 100_000L
         assertNull(Validators.checkTimestampGtNow(futureSeconds, 0, "value"))
     }
 
@@ -745,7 +746,7 @@ class ValidatorsTest {
     @Test
     fun `timestamp within - valid within range`() {
         // A timestamp 5 seconds in the past should be within a 60-second window
-        val recentPast = System.currentTimeMillis() / 1000L - 5L
+        val recentPast = Clock.System.now().toEpochMilliseconds() / 1000L - 5L
         assertNull(Validators.checkTimestampWithin(recentPast, 0, 60L, 0, "value"))
     }
 

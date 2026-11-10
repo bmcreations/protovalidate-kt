@@ -1,8 +1,9 @@
 package dev.bmcreations.protovalidate
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+import kotlin.test.Test
 
 class ValidationResultOrThrowTest {
 
@@ -11,10 +12,12 @@ class ValidationResultOrThrowTest {
         ValidationResult.Valid.orThrow()
     }
 
-    @Test(expected = ProtoValidationException::class)
+    @Test
     fun `orThrow on Invalid throws ProtoValidationException`() {
         val violation = FieldViolation(field = "name", rule = "string.min_len", message = "too short")
-        ValidationResult.Invalid(listOf(violation)).orThrow()
+        assertFailsWith<ProtoValidationException> {
+            ValidationResult.Invalid(listOf(violation)).orThrow()
+        }
     }
 
     @Test
