@@ -24,6 +24,18 @@ subprojects {
     tasks.withType<Sign>().configureEach {
         isRequired = signingKey.isPresent
     }
+    // Build-local Maven repo for the gradle-plugin functional tests, which
+    // resolve the plugin, runtime and protoc plugin jars by version.
+    plugins.withId("maven-publish") {
+        configure<PublishingExtension> {
+            repositories {
+                maven {
+                    name = "testRepo"
+                    url = uri(rootProject.layout.buildDirectory.dir("test-repo"))
+                }
+            }
+        }
+    }
 }
 
 // Exclude conformance modules from the default build — they generate a huge
