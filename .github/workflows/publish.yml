@@ -13,7 +13,8 @@ jobs:
 
   publish:
     needs: verify
-    runs-on: ubuntu-latest
+    # The runtime's iOS artifacts need a macOS host.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +27,7 @@ jobs:
 
       - name: Publish to Maven Central
         run: |
-          ORG_GRADLE_PROJECT_signingInMemoryKey="$(echo "$SIGNING_KEY_BASE64" | base64 -d)" \
+          ORG_GRADLE_PROJECT_signingInMemoryKey="$(echo "$SIGNING_KEY_BASE64" | base64 --decode)" \
           ./gradlew publishAndReleaseToMavenCentral --stacktrace
         env:
           SIGNING_KEY_BASE64: ${{ secrets.SIGNING_IN_MEMORY_KEY }}

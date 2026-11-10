@@ -16,31 +16,72 @@ import java.io.File
  * what the generator writes arrives as a diff in review — which is how the
  * oneof `required` bug would have been visible.
  *
- * Regenerate after an intentional change:
+ * `golden/` holds the protobuf-java output and `golden-wire/` the `target=wire`
+ * output for the same fixtures. Wire output for `golden/boxed/` is generated
+ * with `wire_box_oneofs_min_size=2` and the rest with Wire's defaults, matching
+ * the Wire options `:pgv-conformance-wire` compiles them with. Regenerate both
+ * after an intentional change:
  *
  *     ./gradlew :protoc-plugin:test -PupdateGoldens
  */
 class GoldenOutputTest {
 
     private val goldenDir = File(System.getProperty("golden.dir"))
+    private val wireGoldenDir = File(System.getProperty("golden.wireDir"))
 
-    private fun generate(): Map<String, String> {
+    private fun generate(
+        target: GeneratorTarget = GeneratorTarget.JAVA,
+        wireOptions: WireOptions = WireOptions(),
+        include: (String) -> Boolean = { true },
+    ): Map<String, String> {
         val extractor = PgvRuleExtractor()
         val descriptorSet = File(System.getProperty("golden.descriptorSet"))
         val fileSet = descriptorSet.inputStream().use {
             FileDescriptorSet.parseFrom(it, extractor.createRegistry())
         }
-        val fixtures = fileSet.fileList.filter { it.name.startsWith("golden/") }.map { it.name }.toSet()
+        val fixtures = fileSet.fileList.map { it.name }
+            .filter { it.startsWith("golden/") && include(it) }.toSet()
         assertTrue("no fixture protos in $descriptorSet", fixtures.isNotEmpty())
 
-        return PluginPipeline.generate(fileSet.fileList, fixtures, extractor)
+        return PluginPipeline.generate(fileSet.fileList, fixtures, extractor, target, wireOptions)
             .associate { it.name to it.content }
     }
 
     @Test
     fun `emitted output matches the goldens`() {
-        val generated = generate()
+        assertMatchesGoldens(generate(), goldenDir)
+    }
 
+    @Test
+    fun `wire output matches the wire goldens`() {
+        val boxed = { name: String -> name.startsWith(BOXED_FIXTURES) }
+        val flat = generate(GeneratorTarget.WIRE) { !boxed(it) }
+        val boxedOutput = generate(GeneratorTarget.WIRE, WireOptions(boxOneOfsMinSize = 2), boxed)
+        assertTrue("no boxed-oneof fixtures", boxedOutput.isNotEmpty())
+        assertMatchesGoldens(flat + boxedOutput, wireGoldenDir)
+    }
+
+    /**
+     * The boxed golden must read its oneofs through the box, so regenerating
+     * it with the wrong options cannot pass unnoticed.
+     */
+    @Test
+    fun `boxed oneofs are read through the box only at the min size`() {
+        val validator = generate(GeneratorTarget.WIRE, WireOptions(boxOneOfsMinSize = 2)) {
+            it.startsWith(BOXED_FIXTURES)
+        }.entries.single { it.key.endsWith("/BoxedOneofValidator.kt") }.value
+
+        assertTrue("choice must be read through its box", "choice?.getOrNull(BoxedOneof.CHOICE_S)" in validator)
+        assertTrue("a required boxed oneof is a null box", "choice == null" in validator)
+        assertTrue("a one-member oneof stays flat", "this.only" in validator)
+        assertTrue("proto3 optional is never boxed", "this.opt" in validator)
+    }
+
+    private companion object {
+        const val BOXED_FIXTURES = "golden/boxed/"
+    }
+
+    private fun assertMatchesGoldens(generated: Map<String, String>, goldenDir: File) {
         if (System.getProperty("golden.update") == "true") {
             goldenDir.deleteRecursively()
             generated.forEach { (name, content) ->

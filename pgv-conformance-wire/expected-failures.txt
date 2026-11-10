@@ -1,0 +1,14 @@
+# PGV cases expected to fail against Wire messages, one case name per line.
+# All are enum.defined_only: Wire's decoder moves unknown enum values into
+# unknownFields, and throws EnumConstantNotFoundException for unknown map values.
+# The list is the same with -PwireBoxOneOfsMinSize: a boxed oneof can't hold an
+# unknown enum value either, so "enum inside oneof" fails by throwing instead.
+enum - defined_only - invalid
+enum alias - defined_only - invalid
+enum external - defined_only - invalid
+enum external (double embed) - defined_only - invalid
+enum inside oneof - defined_only - invalid
+enum map - defined_only - invalid
+enum map (external) - defined_only - invalid
+enum repeated - defined_only - invalid
+enum repeated (external) - defined_only - invalid

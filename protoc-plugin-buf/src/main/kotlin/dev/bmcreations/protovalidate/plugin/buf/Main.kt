@@ -1,5 +1,8 @@
 package dev.bmcreations.protovalidate.plugin.buf
 
+import dev.bmcreations.protovalidate.plugin.GeneratorTarget
+import dev.bmcreations.protovalidate.plugin.WireOptions
+import dev.bmcreations.protovalidate.plugin.PluginOptionException
 import dev.bmcreations.protovalidate.plugin.PluginPipeline
 import com.google.protobuf.Descriptors
 import com.google.protobuf.DescriptorProtos.FileDescriptorProto
@@ -34,13 +37,18 @@ fun main() {
     responseBuilder.minimumEdition = com.google.protobuf.DescriptorProtos.Edition.EDITION_2023.number
     responseBuilder.maximumEdition = com.google.protobuf.DescriptorProtos.Edition.EDITION_2023.number
 
-    responseBuilder.addAllFile(
-        PluginPipeline.generate(
-            protoFiles = request.protoFileList,
-            filesToGenerate = request.fileToGenerateList.toSet(),
-            extractor = extractor
+    val targetError = targetError(request.parameter)
+    if (targetError != null) {
+        responseBuilder.error = targetError
+    } else {
+        responseBuilder.addAllFile(
+            PluginPipeline.generate(
+                protoFiles = request.protoFileList,
+                filesToGenerate = request.fileToGenerateList.toSet(),
+                extractor = extractor
+            )
         )
-    )
+    }
 
     responseBuilder.build().writeTo(System.out)
 }
@@ -115,4 +123,23 @@ internal fun registerCustomExtensions(
     }
 
     return ruleDescriptors
+}
+
+/**
+ * The buf plugin generates for protobuf-java only. Returns the response error
+ * for any other `target=` or a Wire option, or null when the parameter is
+ * acceptable.
+ */
+internal fun targetError(parameter: String): String? = try {
+    when (GeneratorTarget.fromParameter(parameter)) {
+        GeneratorTarget.JAVA -> WireOptions.keysIn(parameter).firstOrNull()?.let { key ->
+            "$key is not supported by protoc-gen-validate-kt-buf: it generates protobuf-java " +
+                "validators only. Use protoc-gen-validate-kt with target=wire for Wire."
+        }
+        GeneratorTarget.WIRE ->
+            "target=wire is not supported by protoc-gen-validate-kt-buf: Wire output covers PGV " +
+                "(validate/validate.proto) rules only. Use protoc-gen-validate-kt for Wire."
+    }
+} catch (e: PluginOptionException) {
+    e.message
 }

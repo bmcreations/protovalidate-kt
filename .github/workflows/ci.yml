@@ -42,7 +42,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build conformance JARs
-        run: ./gradlew :conformance:jar :pgv-conformance:jar
+        run: ./gradlew :conformance:jar :pgv-conformance:jar :pgv-conformance-wire:executorJar :pgv-conformance-wire:check
 
       - name: Install buf conformance harness
         run: go install github.com/bufbuild/protovalidate/tools/protovalidate-conformance@$(cat conformance/HARNESS_VERSION)
@@ -58,3 +58,12 @@ jobs:
 
       - name: Run PGV conformance tests
         run: ./pgv-conformance/run-conformance.sh
+
+      - name: Run PGV conformance tests (Wire)
+        run: ./pgv-conformance-wire/run-conformance.sh
+
+      - name: Build Wire conformance JAR (boxed oneofs)
+        run: ./gradlew :pgv-conformance-wire:executorJar :pgv-conformance-wire:check -PwireBoxOneOfsMinSize=1
+
+      - name: Run PGV conformance tests (Wire, boxed oneofs)
+        run: ./pgv-conformance-wire/run-conformance.sh

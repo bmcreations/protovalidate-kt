@@ -13,25 +13,19 @@ data class EmitContext(
     val fileSyntax: FileSyntax = FileSyntax.PROTO3,
     /** All nested types in the current message (for resolving map entry value types) */
     val nestedTypes: List<com.google.protobuf.DescriptorProtos.DescriptorProto> = emptyList(),
+    /** How the emitted code reads fields of the message being validated. */
+    val style: AccessorStyle = JavaAccessors,
 )
 
 object FieldEmitter {
 
-    /**
-     * Strips backtick escaping from an accessor so it can be combined with a suffix.
-     * e.g. `` `val` `` → `val`, then `val` + `List` → `valList`
-     */
-    private fun rawAccessor(accessor: String): String = accessor.removeSurrounding("`")
-
     fun emit(
         fieldProto: FieldDescriptorProto,
         ruleSet: FieldRuleSet,
-        accessorPrefix: String,
         ctx: EmitContext
     ) {
-        val rawFieldName = snakeToCamelLower(fieldProto.name)
-        val fieldName = escapeIfKeyword(rawFieldName)
-        val accessor = if (accessorPrefix.isEmpty()) fieldName else "$accessorPrefix.$fieldName"
+        val style = ctx.style
+        val accessor = style.field(fieldProto)
         val quotedField = "\"${fieldProto.name}\""
         val indent = ctx.indent
 
@@ -64,12 +58,11 @@ object FieldEmitter {
             !hasTypeRequired // type-specific required needs to be outside the guard
 
         if (hasIgnorePresenceGuard) {
-            val hasExpr = if (accessorPrefix.isEmpty()) "has${snakeToCamel(fieldProto.name)}()"
-                else "$accessorPrefix.has${snakeToCamel(fieldProto.name)}()"
+            val hasExpr = style.has(fieldProto)
             // For IF_DEFAULT_VALUE on oneof fields, also check the value isn't zero/empty
             val isOneofField = fieldProto.hasOneofIndex() && !fieldProto.proto3Optional
             val guardExpr = if (isOneofField && ruleSet.ignore == IgnoreMode.IF_DEFAULT_VALUE) {
-                val nonZeroCheck = scalarZeroCheck(fieldProto, accessor)
+                val nonZeroCheck = scalarZeroCheck(fieldProto, accessor, style)
                 if (nonZeroCheck != null) "$hasExpr && $nonZeroCheck" else hasExpr
             } else {
                 hasExpr
@@ -92,25 +85,21 @@ object FieldEmitter {
             if (fieldProto.label == Label.LABEL_REPEATED) {
                 // Repeated/map fields: required means non-empty
                 val isMap = fieldProto.type == Type.TYPE_MESSAGE && fieldProto.typeName.endsWith("Entry")
-                val listAccessor = "${rawAccessor(accessor)}${if (isMap) "Map" else "List"}"
+                val listAccessor = if (isMap) style.map(accessor) else style.list(accessor)
                 effectiveCtx.sb.appendLine("${effectiveIndent}Validators.checkRequired(${listAccessor}.isNotEmpty(), $quotedField)?.let { violations += it }")
                 if (hasOtherRules) {
                     // Short-circuit: only validate further if non-empty
                     effectiveCtx.sb.appendLine("${effectiveIndent}if (${listAccessor}.isNotEmpty()) {")
                 }
             } else if (fieldHasPresence(fieldProto, effectiveCtx.fileSyntax)) {
-                val hasAccessor = if (accessorPrefix.isEmpty()) {
-                    "has${snakeToCamel(fieldProto.name)}()"
-                } else {
-                    "$accessorPrefix.has${snakeToCamel(fieldProto.name)}()"
-                }
+                val hasAccessor = style.has(fieldProto)
                 effectiveCtx.sb.appendLine("${effectiveIndent}Validators.checkRequired($hasAccessor, $quotedField)?.let { violations += it }")
                 if (hasOtherRules) {
                     effectiveCtx.sb.appendLine("${effectiveIndent}if ($hasAccessor) {")
                 }
             } else {
                 // Implicit presence scalar: required means not the zero value
-                val zeroCheck = scalarZeroCheck(fieldProto, accessor)
+                val zeroCheck = scalarZeroCheck(fieldProto, accessor, style)
                 if (zeroCheck != null) {
                     effectiveCtx.sb.appendLine("${effectiveIndent}Validators.checkRequired($zeroCheck, $quotedField)?.let { violations += it }")
                     if (hasOtherRules) {
@@ -132,11 +121,7 @@ object FieldEmitter {
             val typeName = fieldProto.typeName
             val targetPkg = innerCtx.validatedTypes[typeName]
             if (targetPkg != null) {
-                val hasAccessor = if (accessorPrefix.isEmpty()) {
-                    "has${snakeToCamel(fieldProto.name)}()"
-                } else {
-                    "$accessorPrefix.has${snakeToCamel(fieldProto.name)}()"
-                }
+                val hasAccessor = style.has(fieldProto)
                 // Skip the has-check if we're already inside a required guard or presence guard
                 if ((!requiredGuard && !hasIgnorePresenceGuard) || !fieldHasPresence(fieldProto, innerCtx.fileSyntax)) {
                     innerCtx.sb.appendLine("${innerIndent}if ($hasAccessor) {")
@@ -176,11 +161,7 @@ object FieldEmitter {
             // Emit CEL rules for the repeated/map field itself
             // For these, `this` in CEL refers to the list/map accessor
             val celFieldType = if (isMapField) CelFieldType.MAP else CelFieldType.REPEATED
-            val celAccessor = if (isMapField) {
-                "${rawAccessor(accessor)}Map"
-            } else {
-                "${rawAccessor(accessor)}List"
-            }
+            val celAccessor = if (isMapField) style.map(accessor) else style.list(accessor)
             val celRuleSet = ruleSet.copy(type = if (isMapField) RuleType.MAP else RuleType.REPEATED)
 
             // Determine map value type or repeated element type from nested types
@@ -201,16 +182,12 @@ object FieldEmitter {
 
         // WKT wrapper unwrapping: if the field is a message wrapping a scalar, unwrap to .value
         val isWktWrapper = fieldProto.type == Type.TYPE_MESSAGE && isWktWrapperType(fieldProto.typeName)
-        val effectiveAccessor = if (isWktWrapper) "$accessor.value" else accessor
+        val effectiveAccessor = if (isWktWrapper) style.wrapperValue(accessor) else accessor
         val wktNeedsGuard = isWktWrapper && !requiredGuard && !hasIgnorePresenceGuard
         val wktCtx = if (isWktWrapper) {
             if (wktNeedsGuard) {
                 // Wrap scalar checks inside a has-check for the wrapper message
-                val hasAccessor = if (accessorPrefix.isEmpty()) {
-                    "has${snakeToCamel(fieldProto.name)}()"
-                } else {
-                    "$accessorPrefix.has${snakeToCamel(fieldProto.name)}()"
-                }
+                val hasAccessor = style.has(fieldProto)
                 innerCtx.sb.appendLine("${innerIndent}if ($hasAccessor) {")
                 innerCtx.copy(indent = "$innerIndent    ")
             } else {
@@ -319,7 +296,7 @@ object FieldEmitter {
         if (!hasConst && !durHasLower && !durHasUpper && !hasIn && !hasNotIn) return
 
         rules.const?.let { c ->
-            ctx.sb.appendLine("${indent}Validators.checkDurationConst($accessor.seconds, $accessor.nanos, ${c.seconds}L, ${c.nanos}, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkDurationConst(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${c.seconds}L, ${c.nanos}, $field)?.let { violations += it }")
         }
 
         if (durHasLower && durHasUpper) {
@@ -327,29 +304,29 @@ object FieldEmitter {
             val upper = rules.lt ?: rules.lte!!
             val lowerInclusive = rules.gt == null
             val upperInclusive = rules.lt == null
-            ctx.sb.appendLine("${indent}Validators.checkDurationRange($accessor.seconds, $accessor.nanos, ${lower.seconds}L, ${lower.nanos}, ${upper.seconds}L, ${upper.nanos}, $lowerInclusive, $upperInclusive, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkDurationRange(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${lower.seconds}L, ${lower.nanos}, ${upper.seconds}L, ${upper.nanos}, $lowerInclusive, $upperInclusive, $field)?.let { violations += it }")
         } else {
             rules.lt?.let { v ->
-                ctx.sb.appendLine("${indent}Validators.checkDurationLt($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${indent}Validators.checkDurationLt(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
             }
             rules.lte?.let { v ->
-                ctx.sb.appendLine("${indent}Validators.checkDurationLte($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${indent}Validators.checkDurationLte(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
             }
             rules.gt?.let { v ->
-                ctx.sb.appendLine("${indent}Validators.checkDurationGt($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${indent}Validators.checkDurationGt(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
             }
             rules.gte?.let { v ->
-                ctx.sb.appendLine("${indent}Validators.checkDurationGte($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${indent}Validators.checkDurationGte(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
             }
         }
 
         if (rules.inList.isNotEmpty()) {
             val items = rules.inList.joinToString(", ") { v -> "Pair(${v.seconds}L, ${v.nanos})" }
-            ctx.sb.appendLine("${indent}Validators.checkDurationIn($accessor.seconds, $accessor.nanos, listOf($items), $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkDurationIn(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, listOf($items), $field)?.let { violations += it }")
         }
         if (rules.notInList.isNotEmpty()) {
             val items = rules.notInList.joinToString(", ") { v -> "Pair(${v.seconds}L, ${v.nanos})" }
-            ctx.sb.appendLine("${indent}Validators.checkDurationNotIn($accessor.seconds, $accessor.nanos, listOf($items), $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkDurationNotIn(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, listOf($items), $field)?.let { violations += it }")
         }
     }
 
@@ -384,7 +361,7 @@ object FieldEmitter {
         if (!hasChecks) return
 
         rules.const?.let { c ->
-            ctx.sb.appendLine("${indent}Validators.checkTimestampConst($accessor.seconds, $accessor.nanos, ${c.seconds}L, ${c.nanos}, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkTimestampConst(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${c.seconds}L, ${c.nanos}, $field)?.let { violations += it }")
         }
 
         if (tsHasLower && tsHasUpper) {
@@ -392,39 +369,39 @@ object FieldEmitter {
             val upper = rules.lt ?: rules.lte!!
             val lowerInclusive = rules.gt == null
             val upperInclusive = rules.lt == null
-            ctx.sb.appendLine("${indent}Validators.checkTimestampRange($accessor.seconds, $accessor.nanos, ${lower.seconds}L, ${lower.nanos}, ${upper.seconds}L, ${upper.nanos}, $lowerInclusive, $upperInclusive, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkTimestampRange(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${lower.seconds}L, ${lower.nanos}, ${upper.seconds}L, ${upper.nanos}, $lowerInclusive, $upperInclusive, $field)?.let { violations += it }")
         } else {
             rules.lt?.let { v ->
-                ctx.sb.appendLine("${indent}Validators.checkTimestampLt($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${indent}Validators.checkTimestampLt(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
             }
             rules.lte?.let { v ->
-                ctx.sb.appendLine("${indent}Validators.checkTimestampLte($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${indent}Validators.checkTimestampLte(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
             }
             rules.gt?.let { v ->
-                ctx.sb.appendLine("${indent}Validators.checkTimestampGt($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${indent}Validators.checkTimestampGt(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
             }
             rules.gte?.let { v ->
-                ctx.sb.appendLine("${indent}Validators.checkTimestampGte($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${indent}Validators.checkTimestampGte(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
             }
         }
 
         if (rules.ltNow) {
-            ctx.sb.appendLine("${indent}Validators.checkTimestampLtNow($accessor.seconds, $accessor.nanos, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkTimestampLtNow(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, $field)?.let { violations += it }")
         }
         if (rules.gtNow) {
-            ctx.sb.appendLine("${indent}Validators.checkTimestampGtNow($accessor.seconds, $accessor.nanos, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkTimestampGtNow(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, $field)?.let { violations += it }")
         }
         rules.within?.let { w ->
-            ctx.sb.appendLine("${indent}Validators.checkTimestampWithin($accessor.seconds, $accessor.nanos, ${w.seconds}L, ${w.nanos}, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkTimestampWithin(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${w.seconds}L, ${w.nanos}, $field)?.let { violations += it }")
         }
 
         if (rules.inList.isNotEmpty()) {
             val items = rules.inList.joinToString(", ") { v -> "Pair(${v.seconds}L, ${v.nanos})" }
-            ctx.sb.appendLine("${indent}Validators.checkTimestampIn($accessor.seconds, $accessor.nanos, listOf($items), $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkTimestampIn(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, listOf($items), $field)?.let { violations += it }")
         }
         if (rules.notInList.isNotEmpty()) {
             val items = rules.notInList.joinToString(", ") { v -> "Pair(${v.seconds}L, ${v.nanos})" }
-            ctx.sb.appendLine("${indent}Validators.checkTimestampNotIn($accessor.seconds, $accessor.nanos, listOf($items), $field)?.let { violations += it }")
+            ctx.sb.appendLine("${indent}Validators.checkTimestampNotIn(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, listOf($items), $field)?.let { violations += it }")
         }
     }
 
@@ -500,7 +477,7 @@ object FieldEmitter {
         val ba = "$accessor.toByteArray()"
         val hasIgnoreGuard = rules.ignore == IgnoreMode.IF_UNPOPULATED || rules.ignore == IgnoreMode.IF_DEFAULT_VALUE
         if (hasIgnoreGuard) {
-            ctx.sb.appendLine("${indent}if (!$accessor.isEmpty) {")
+            ctx.sb.appendLine("${indent}if (${ctx.style.bytesNotEmpty(accessor)}) {")
         }
         val i = if (hasIgnoreGuard) "$indent    " else indent
 
@@ -606,14 +583,19 @@ object FieldEmitter {
     private fun emitEnumRules(rules: EnumRuleSet, accessor: String, field: String, ctx: EmitContext) {
         // For top-level fields: myField → myFieldValue (protobuf-java convention)
         // For repeated items: item → item.number (enum value in a list)
-        val numericAccessor = if (accessor == "item") "item.number" else "${rawAccessor(accessor)}Value"
+        val numericAccessor = ctx.style.enumNumber(accessor)
         rules.const?.let {
             ctx.sb.appendLine("${ctx.indent}Validators.checkEnumConst($numericAccessor, $it, $field)?.let { violations += it }")
         }
         if (rules.definedOnly) {
-            ctx.sb.appendLine("${ctx.indent}if ($accessor.toString() == \"UNRECOGNIZED\") {")
-            ctx.sb.appendLine("${ctx.indent}    violations += dev.bmcreations.protovalidate.FieldViolation($field, \"enum.defined_only\", \"value must be a defined enum value\")")
-            ctx.sb.appendLine("${ctx.indent}}")
+            val undefined = ctx.style.enumUndefined(accessor)
+            if (undefined != null) {
+                ctx.sb.appendLine("${ctx.indent}if ($undefined) {")
+                ctx.sb.appendLine("${ctx.indent}    violations += dev.bmcreations.protovalidate.FieldViolation($field, \"enum.defined_only\", \"value must be a defined enum value\")")
+                ctx.sb.appendLine("${ctx.indent}}")
+            } else {
+                ctx.sb.appendLine("${ctx.indent}// enum.defined_only: undefined values never reach this message class")
+            }
         }
         if (rules.inList.isNotEmpty()) {
             val items = rules.inList.joinToString(", ")
@@ -639,18 +621,18 @@ object FieldEmitter {
 
         val hasIgnoreGuard = repeated.ignore == IgnoreMode.IF_UNPOPULATED || repeated.ignore == IgnoreMode.IF_DEFAULT_VALUE
         if (hasIgnoreGuard) {
-            ctx.sb.appendLine("${indent}if (${rawAccessor(accessor)}List.isNotEmpty()) {")
+            ctx.sb.appendLine("${indent}if (${ctx.style.list(accessor)}.isNotEmpty()) {")
         }
         val i = if (hasIgnoreGuard) "$indent    " else indent
 
         repeated.minItems?.let {
-            ctx.sb.appendLine("${i}Validators.checkMinItems(${rawAccessor(accessor)}List.size, ${it}L, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkMinItems(${ctx.style.list(accessor)}.size, ${it}L, $field)?.let { violations += it }")
         }
         repeated.maxItems?.let {
-            ctx.sb.appendLine("${i}Validators.checkMaxItems(${rawAccessor(accessor)}List.size, ${it}L, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkMaxItems(${ctx.style.list(accessor)}.size, ${it}L, $field)?.let { violations += it }")
         }
         if (repeated.unique) {
-            ctx.sb.appendLine("${i}Validators.checkUnique(${rawAccessor(accessor)}List, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkUnique(${ctx.style.list(accessor)}, $field)?.let { violations += it }")
         }
 
         // Per-item validation
@@ -660,12 +642,12 @@ object FieldEmitter {
 
             if (!skipItems) {
                 val rawFieldName = fieldProto.name
-                ctx.sb.appendLine("${i}for ((index, item) in ${rawAccessor(accessor)}List.withIndex()) {")
+                ctx.sb.appendLine("${i}for ((index, item) in ${ctx.style.list(accessor)}.withIndex()) {")
                 val itemCtx = ctx.copy(indent = "$i    ")
 
                 // For WKT wrapper types (Int32Value, etc.), item is a message — unwrap to .value
                 val isWrappedItem = fieldProto.type == Type.TYPE_MESSAGE && isWktWrapperType(fieldProto.typeName)
-                val itemAccessor = if (isWrappedItem) "item.value" else "item"
+                val itemAccessor = if (isWrappedItem) ctx.style.wrapperValue("item") else "item"
 
                 // If items have type-specific rules, emit them (includes CEL rules)
                 // Pass the proto field type for proper CEL type inference (e.g., enum → .number)
@@ -699,7 +681,7 @@ object FieldEmitter {
             val targetPkg = ctx.validatedTypes[typeName]
             if (targetPkg != null) {
                 val rawFieldName = fieldProto.name
-                ctx.sb.appendLine("${i}for ((index, item) in ${rawAccessor(accessor)}List.withIndex()) {")
+                ctx.sb.appendLine("${i}for ((index, item) in ${ctx.style.list(accessor)}.withIndex()) {")
                 ctx.sb.appendLine("$i    item.validate().let { result ->")
                 ctx.sb.appendLine("$i        if (result is ValidationResult.Invalid) {")
                 ctx.sb.appendLine($$"$$i            violations += result.violations.map { it.copy(field = \"$${rawFieldName}[$index].${it.field}\") }")
@@ -721,15 +703,15 @@ object FieldEmitter {
         val indent = ctx.indent
         val hasIgnoreGuard = rules.ignore == IgnoreMode.IF_UNPOPULATED || rules.ignore == IgnoreMode.IF_DEFAULT_VALUE
         if (hasIgnoreGuard) {
-            ctx.sb.appendLine("${indent}if (${rawAccessor(accessor)}Map.isNotEmpty()) {")
+            ctx.sb.appendLine("${indent}if (${ctx.style.map(accessor)}.isNotEmpty()) {")
         }
         val i = if (hasIgnoreGuard) "$indent    " else indent
 
         rules.minPairs?.let {
-            ctx.sb.appendLine("${i}Validators.checkMinPairs(${rawAccessor(accessor)}Map.size, ${it}L, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkMinPairs(${ctx.style.map(accessor)}.size, ${it}L, $field)?.let { violations += it }")
         }
         rules.maxPairs?.let {
-            ctx.sb.appendLine("${i}Validators.checkMaxPairs(${rawAccessor(accessor)}Map.size, ${it}L, $field)?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkMaxPairs(${ctx.style.map(accessor)}.size, ${it}L, $field)?.let { violations += it }")
         }
 
         // Per-key/value validation
@@ -737,7 +719,7 @@ object FieldEmitter {
         val valueRules = rules.values?.takeIf { it.type != RuleType.NONE || it.celRules.isNotEmpty() || it.predefinedCelRules.isNotEmpty() }
         if (keyRules != null || valueRules != null) {
             val rawFieldName = field.removeSurrounding("\"")
-            ctx.sb.appendLine("${i}for ((mapKey, mapValue) in ${rawAccessor(accessor)}Map) {")
+            ctx.sb.appendLine("${i}for ((mapKey, mapValue) in ${ctx.style.map(accessor)}) {")
             if (keyRules != null) {
                 val keyCtx = ctx.copy(indent = "$i    ")
                 emitValueRules(keyRules, "mapKey", $$"\"$${rawFieldName}[$mapKey].key\"", keyCtx, keyProtoType)
@@ -759,7 +741,7 @@ object FieldEmitter {
 
     private fun emitDurationRules(rules: DurationRuleSet, accessor: String, field: String, ctx: EmitContext) {
         val indent = ctx.indent
-        val hasAccessor = "has${rawAccessor(accessor).replaceFirstChar { it.uppercaseChar() }}()"
+        val hasAccessor = ctx.style.hasFromAccessor(accessor)
         if (rules.required) {
             ctx.sb.appendLine("${indent}Validators.checkDurationRequired($hasAccessor, $field)?.let { violations += it }")
         }
@@ -774,7 +756,7 @@ object FieldEmitter {
             val i = "$indent    "
 
             rules.const?.let { c ->
-                ctx.sb.appendLine("${i}Validators.checkDurationConst($accessor.seconds, $accessor.nanos, ${c.seconds}L, ${c.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkDurationConst(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${c.seconds}L, ${c.nanos}, $field)?.let { violations += it }")
             }
 
             if (durHasLower && durHasUpper) {
@@ -782,29 +764,29 @@ object FieldEmitter {
                 val upper = rules.lt ?: rules.lte!!
                 val lowerInclusive = rules.gt == null
                 val upperInclusive = rules.lt == null
-                ctx.sb.appendLine("${i}Validators.checkDurationRange($accessor.seconds, $accessor.nanos, ${lower.seconds}L, ${lower.nanos}, ${upper.seconds}L, ${upper.nanos}, $lowerInclusive, $upperInclusive, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkDurationRange(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${lower.seconds}L, ${lower.nanos}, ${upper.seconds}L, ${upper.nanos}, $lowerInclusive, $upperInclusive, $field)?.let { violations += it }")
             } else {
                 rules.lt?.let { v ->
-                    ctx.sb.appendLine("${i}Validators.checkDurationLt($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                    ctx.sb.appendLine("${i}Validators.checkDurationLt(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
                 }
                 rules.lte?.let { v ->
-                    ctx.sb.appendLine("${i}Validators.checkDurationLte($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                    ctx.sb.appendLine("${i}Validators.checkDurationLte(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
                 }
                 rules.gt?.let { v ->
-                    ctx.sb.appendLine("${i}Validators.checkDurationGt($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                    ctx.sb.appendLine("${i}Validators.checkDurationGt(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
                 }
                 rules.gte?.let { v ->
-                    ctx.sb.appendLine("${i}Validators.checkDurationGte($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                    ctx.sb.appendLine("${i}Validators.checkDurationGte(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
                 }
             }
 
             if (rules.inList.isNotEmpty()) {
                 val items = rules.inList.joinToString(", ") { v -> "Pair(${v.seconds}L, ${v.nanos})" }
-                ctx.sb.appendLine("${i}Validators.checkDurationIn($accessor.seconds, $accessor.nanos, listOf($items), $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkDurationIn(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, listOf($items), $field)?.let { violations += it }")
             }
             if (rules.notInList.isNotEmpty()) {
                 val items = rules.notInList.joinToString(", ") { v -> "Pair(${v.seconds}L, ${v.nanos})" }
-                ctx.sb.appendLine("${i}Validators.checkDurationNotIn($accessor.seconds, $accessor.nanos, listOf($items), $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkDurationNotIn(${ctx.style.durationSeconds(accessor)}, ${ctx.style.durationNanos(accessor)}, listOf($items), $field)?.let { violations += it }")
             }
 
             ctx.sb.appendLine("${indent}}")
@@ -815,7 +797,7 @@ object FieldEmitter {
 
     private fun emitTimestampRules(rules: TimestampRuleSet, accessor: String, field: String, ctx: EmitContext) {
         val indent = ctx.indent
-        val hasAccessor = "has${rawAccessor(accessor).replaceFirstChar { it.uppercaseChar() }}()"
+        val hasAccessor = ctx.style.hasFromAccessor(accessor)
         if (rules.required) {
             ctx.sb.appendLine("${indent}Validators.checkTimestampRequired($hasAccessor, $field)?.let { violations += it }")
         }
@@ -830,7 +812,7 @@ object FieldEmitter {
             val i = "$indent    "
 
             rules.const?.let { c ->
-                ctx.sb.appendLine("${i}Validators.checkTimestampConst($accessor.seconds, $accessor.nanos, ${c.seconds}L, ${c.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkTimestampConst(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${c.seconds}L, ${c.nanos}, $field)?.let { violations += it }")
             }
 
             if (tsHasLower && tsHasUpper) {
@@ -838,39 +820,39 @@ object FieldEmitter {
                 val upper = rules.lt ?: rules.lte!!
                 val lowerInclusive = rules.gt == null
                 val upperInclusive = rules.lt == null
-                ctx.sb.appendLine("${i}Validators.checkTimestampRange($accessor.seconds, $accessor.nanos, ${lower.seconds}L, ${lower.nanos}, ${upper.seconds}L, ${upper.nanos}, $lowerInclusive, $upperInclusive, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkTimestampRange(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${lower.seconds}L, ${lower.nanos}, ${upper.seconds}L, ${upper.nanos}, $lowerInclusive, $upperInclusive, $field)?.let { violations += it }")
             } else {
                 rules.lt?.let { v ->
-                    ctx.sb.appendLine("${i}Validators.checkTimestampLt($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                    ctx.sb.appendLine("${i}Validators.checkTimestampLt(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
                 }
                 rules.lte?.let { v ->
-                    ctx.sb.appendLine("${i}Validators.checkTimestampLte($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                    ctx.sb.appendLine("${i}Validators.checkTimestampLte(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
                 }
                 rules.gt?.let { v ->
-                    ctx.sb.appendLine("${i}Validators.checkTimestampGt($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                    ctx.sb.appendLine("${i}Validators.checkTimestampGt(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
                 }
                 rules.gte?.let { v ->
-                    ctx.sb.appendLine("${i}Validators.checkTimestampGte($accessor.seconds, $accessor.nanos, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
+                    ctx.sb.appendLine("${i}Validators.checkTimestampGte(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${v.seconds}L, ${v.nanos}, $field)?.let { violations += it }")
                 }
             }
 
             if (rules.ltNow) {
-                ctx.sb.appendLine("${i}Validators.checkTimestampLtNow($accessor.seconds, $accessor.nanos, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkTimestampLtNow(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, $field)?.let { violations += it }")
             }
             if (rules.gtNow) {
-                ctx.sb.appendLine("${i}Validators.checkTimestampGtNow($accessor.seconds, $accessor.nanos, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkTimestampGtNow(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, $field)?.let { violations += it }")
             }
             rules.within?.let { w ->
-                ctx.sb.appendLine("${i}Validators.checkTimestampWithin($accessor.seconds, $accessor.nanos, ${w.seconds}L, ${w.nanos}, $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkTimestampWithin(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, ${w.seconds}L, ${w.nanos}, $field)?.let { violations += it }")
             }
 
             if (rules.inList.isNotEmpty()) {
                 val items = rules.inList.joinToString(", ") { v -> "Pair(${v.seconds}L, ${v.nanos})" }
-                ctx.sb.appendLine("${i}Validators.checkTimestampIn($accessor.seconds, $accessor.nanos, listOf($items), $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkTimestampIn(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, listOf($items), $field)?.let { violations += it }")
             }
             if (rules.notInList.isNotEmpty()) {
                 val items = rules.notInList.joinToString(", ") { v -> "Pair(${v.seconds}L, ${v.nanos})" }
-                ctx.sb.appendLine("${i}Validators.checkTimestampNotIn($accessor.seconds, $accessor.nanos, listOf($items), $field)?.let { violations += it }")
+                ctx.sb.appendLine("${i}Validators.checkTimestampNotIn(${ctx.style.timestampSeconds(accessor)}, ${ctx.style.timestampNanos(accessor)}, listOf($items), $field)?.let { violations += it }")
             }
 
             ctx.sb.appendLine("${indent}}")
@@ -919,10 +901,10 @@ object FieldEmitter {
      * Returns a boolean expression that is true when the implicit-presence scalar field
      * is NOT the zero/default value. Used for `required` checks on fields without `has*()`.
      */
-    private fun scalarZeroCheck(field: FieldDescriptorProto, accessor: String): String? {
+    private fun scalarZeroCheck(field: FieldDescriptorProto, accessor: String, style: AccessorStyle): String? {
         return when (field.type) {
             Type.TYPE_STRING -> "$accessor.isNotEmpty()"
-            Type.TYPE_BYTES -> "!$accessor.isEmpty"
+            Type.TYPE_BYTES -> style.bytesNotEmpty(accessor)
             Type.TYPE_BOOL -> accessor // bool: true = set, false = zero
             Type.TYPE_INT32, Type.TYPE_SINT32, Type.TYPE_SFIXED32 -> "$accessor != 0"
             Type.TYPE_INT64, Type.TYPE_SINT64, Type.TYPE_SFIXED64 -> "$accessor != 0L"
@@ -930,7 +912,7 @@ object FieldEmitter {
             Type.TYPE_UINT64, Type.TYPE_FIXED64 -> "$accessor != 0L"
             Type.TYPE_FLOAT -> "$accessor != 0.0f"
             Type.TYPE_DOUBLE -> "$accessor != 0.0"
-            Type.TYPE_ENUM -> "${rawAccessor(accessor)}Value != 0"
+            Type.TYPE_ENUM -> "${style.fieldEnumNumber(accessor)} != 0"
             else -> null
         }
     }
@@ -939,7 +921,7 @@ object FieldEmitter {
 
     private fun emitAnyRules(rules: AnyRuleSet, accessor: String, field: String, ctx: EmitContext) {
         val indent = ctx.indent
-        val hasAny = "has${rawAccessor(accessor).replaceFirstChar { it.uppercaseChar() }}()"
+        val hasAny = ctx.style.hasFromAccessor(accessor)
         if (rules.required) {
             ctx.sb.appendLine("${indent}Validators.checkRequired($hasAny, $field)?.let { violations += it }")
         }
@@ -961,7 +943,7 @@ object FieldEmitter {
 
     private fun emitFieldMaskRules(rules: FieldMaskRuleSet, accessor: String, field: String, ctx: EmitContext) {
         val indent = ctx.indent
-        val hasAccessor = "has${rawAccessor(accessor).replaceFirstChar { it.uppercaseChar() }}()"
+        val hasAccessor = ctx.style.hasFromAccessor(accessor)
 
         val hasChecks = rules.constPaths != null || rules.inList.isNotEmpty() || rules.notInList.isNotEmpty()
         if (!hasChecks) return
@@ -971,17 +953,17 @@ object FieldEmitter {
 
         rules.constPaths?.let { paths ->
             val items = paths.joinToString(", ") { "\"${escapeForKotlinString(it)}\"" }
-            ctx.sb.appendLine("${i}Validators.checkFieldMaskConst($accessor.pathsList, listOf($items), $field)?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkFieldMaskConst(${ctx.style.fieldMaskPaths(accessor)}, listOf($items), $field)?.let { violations += it }")
         }
 
         if (rules.inList.isNotEmpty()) {
             val items = rules.inList.joinToString(", ") { "\"${escapeForKotlinString(it)}\"" }
-            ctx.sb.appendLine("${i}Validators.checkFieldMaskIn($accessor.pathsList, listOf($items), $field)?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkFieldMaskIn(${ctx.style.fieldMaskPaths(accessor)}, listOf($items), $field)?.let { violations += it }")
         }
 
         if (rules.notInList.isNotEmpty()) {
             val items = rules.notInList.joinToString(", ") { "\"${escapeForKotlinString(it)}\"" }
-            ctx.sb.appendLine("${i}Validators.checkFieldMaskNotIn($accessor.pathsList, listOf($items), $field)?.let { violations += it }")
+            ctx.sb.appendLine("${i}Validators.checkFieldMaskNotIn(${ctx.style.fieldMaskPaths(accessor)}, listOf($items), $field)?.let { violations += it }")
         }
 
         ctx.sb.appendLine("${indent}}")
@@ -1022,18 +1004,7 @@ object FieldEmitter {
         // - Enum fields: CEL compares with int literals, so use the numeric value accessor
         // - Proto3 has getFieldValue() (int), proto2 only has getField() (enum) → use .number
         val celAccessor = when (celFieldType) {
-            CelFieldType.ENUM -> {
-                if (accessor == "item" || accessor == "item.value" || accessor == "mapKey" || accessor == "mapValue") {
-                    // Repeated/map enum items: use .number for CEL integer comparison
-                    "$accessor.number"
-                } else if (ctx.fileSyntax == FileSyntax.PROTO2) {
-                    // Proto2: no *Value getter, use .number on the enum accessor
-                    "$accessor.number"
-                } else {
-                    val raw = rawAccessor(accessor)
-                    "${raw}Value"
-                }
-            }
+            CelFieldType.ENUM -> ctx.style.celEnumNumber(accessor, ctx.fileSyntax)
             else -> accessor
         }
 

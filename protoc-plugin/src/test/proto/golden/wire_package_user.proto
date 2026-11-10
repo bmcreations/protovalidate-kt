@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+// A validator in another package calling into Tagged's, which has to import
+// it from the wire_package.
+
+package golden.wirepkg.user;
+
+option java_package = "golden.wirepkg.user";
+option java_multiple_files = true;
+
+import "golden/wire_package.proto";
+
+message TaggedHolder {
+    golden.wirepkg.Tagged tagged = 1;
+}

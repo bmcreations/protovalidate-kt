@@ -29,17 +29,17 @@ private fun executeCase(anyMsg: Any): TestResult {
         val message = parseFrom.invoke(null, anyMsg.value.toByteArray()) as Message
 
         // Find the validator extension function
-        val validatorClass = resolveValidatorClass(typeName)
-            ?: return TestResult.newBuilder()
-                .setValid(true) // No validator means no constraints
-                .build()
-
-        val validateMethod = validatorClass.methods.find {
+        val validateMethod = resolveValidatorClass(typeName)?.methods?.find {
             it.name == "validate" && it.parameterCount == 1 &&
                 it.parameterTypes[0].isAssignableFrom(messageClass)
-        } ?: return TestResult.newBuilder()
-            .setValid(true) // No validate method means no constraints
-            .build()
+        }
+        if (validateMethod == null) {
+            // Set PGV_NO_VALIDATOR_LOG to count these: they pass without checking anything.
+            System.getenv("PGV_NO_VALIDATOR_LOG")?.let { java.io.File(it).appendText("$typeName\n") }
+            return TestResult.newBuilder()
+                .setValid(true) // No validator means no constraints
+                .build()
+        }
 
         val result = validateMethod.invoke(null, message) as ValidationResult
 

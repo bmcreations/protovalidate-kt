@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") apply false
+    kotlin("multiplatform") apply false
     id("com.vanniktech.maven.publish") apply false
 }
 
@@ -23,12 +24,24 @@ subprojects {
     tasks.withType<Sign>().configureEach {
         isRequired = signingKey.isPresent
     }
+    // Build-local Maven repo for the gradle-plugin functional tests, which
+    // resolve the plugin, runtime and protoc plugin jars by version.
+    plugins.withId("maven-publish") {
+        configure<PublishingExtension> {
+            repositories {
+                maven {
+                    name = "testRepo"
+                    url = uri(rootProject.layout.buildDirectory.dir("test-repo"))
+                }
+            }
+        }
+    }
 }
 
 // Exclude conformance modules from the default build — they generate a huge
 // amount of code and are run separately in CI via their own job.
 // To build them, target the module explicitly: ./gradlew :conformance:jar
-val conformanceModules = setOf("conformance", "pgv-conformance")
+val conformanceModules = setOf("conformance", "pgv-conformance", "pgv-conformance-wire")
 val requestedTasks = gradle.startParameter.taskNames
 val conformanceRequested = requestedTasks.any { arg ->
     conformanceModules.any { mod -> arg.startsWith(":$mod") }

@@ -1,0 +1,33 @@
+syntax = "proto2";
+
+// proto2 presence: Wire makes every optional field nullable, defaults
+// included, and every required field non-null.
+
+package golden.proto2;
+
+option java_package = "golden.proto2";
+option java_multiple_files = true;
+
+import "validate/validate.proto";
+
+enum Level {
+    LOW = 1;
+    HIGH = 2;
+}
+
+message Proto2Inner {
+    optional string id = 1 [(validate.rules).string.min_len = 1];
+}
+
+message Proto2Fields {
+    optional string name = 1 [(validate.rules).string.min_len = 2];
+    required int32 count = 2 [(validate.rules).int32.gte = 1];
+    optional int32 limit = 3 [default = 7, (validate.rules).int32.lte = 10];
+    optional Proto2Inner inner = 4 [(validate.rules).message.required = true];
+    optional Level level = 5 [(validate.rules).enum = {not_in: [2]}];
+    required string code = 6 [(validate.rules).string.len = 3];
+    optional bool flag = 7 [default = true, (validate.rules).bool.const = true];
+    repeated int32 nums = 8 [(validate.rules).repeated.max_items = 2];
+    optional Proto2Inner plain = 9;
+    required Proto2Inner req_inner = 10;
+}

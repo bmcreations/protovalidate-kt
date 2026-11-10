@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+// Boxed-oneof fixtures. The Wire golden for this directory is generated with
+// wire_box_oneofs_min_size=2, matching the Wire options that compile it, so a
+// oneof with two or more members is one `OneOf<Key, Value>?` property.
+
+package golden.boxed;
+
+option java_package = "golden.boxed";
+option java_multiple_files = true;
+
+import "validate/validate.proto";
+
+message Item {
+    string id = 1 [(validate.rules).string.min_len = 1];
+}
+
+// A required boxed oneof next to a one-member oneof that stays flat and a
+// proto3 `optional`, which Wire never boxes.
+message BoxedOneof {
+    string before = 1 [(validate.rules).string.max_len = 10];
+
+    oneof choice {
+        option (validate.required) = true;
+
+        string s = 2 [(validate.rules).string = {min_len: 3, max_len: 5}];
+        int32 i = 3 [(validate.rules).int32.gt = 0];
+        Item item = 4 [(validate.rules).message.required = true];
+        Item plain = 5;
+    }
+
+    oneof single {
+        string only = 6 [(validate.rules).string.min_len = 1];
+    }
+
+    optional string opt = 7 [(validate.rules).string.min_len = 2];
+    string after = 8 [(validate.rules).string.min_len = 1];
+}
+
+// Names that collide: the oneof `result` and member `violations` are emitter
+// locals, `in` is a keyword, and the nested message's keys are qualified by
+// its own class.
+message BoxedNames {
+    oneof result {
+        string violations = 1 [(validate.rules).string.min_len = 1];
+        string in = 2 [(validate.rules).string.max_len = 2];
+    }
+
+    message Nested {
+        oneof o {
+            string a = 1 [(validate.rules).string.min_len = 1];
+            string b = 2;
+        }
+    }
+
+    Nested nested = 3;
+}
+
+// Wire renames a oneof named after a Kotlin keyword (`inner_`), and its keys
+// follow the original name.
+message BoxedKeyword {
+    oneof inner {
+        string a = 1 [(validate.rules).string.min_len = 1];
+        int64 b = 2 [(validate.rules).int64.lt = 5];
+    }
+}

@@ -13,15 +13,15 @@ object CodeGenerator {
     fun generate(
         fileProto: FileDescriptorProto,
         validatedTypes: Map<String, String>,
-        extractor: RuleExtractor
+        extractor: RuleExtractor,
+        target: GeneratorTarget = GeneratorTarget.JAVA,
+        knownTypes: Set<String> = emptySet(),
+        wireOptions: WireOptions = WireOptions(),
     ): List<CodeGeneratorResponse.File> {
-        val javaPackage = if (fileProto.options.hasJavaPackage()) {
-            fileProto.options.javaPackage
-        } else {
-            fileProto.`package`
-        }
+        val javaPackage = kotlinPackage(fileProto, target)
 
-        val javaMultipleFiles = fileProto.options.javaMultipleFiles
+        // Wire has no outer class: every message is a class in the package itself.
+        val javaMultipleFiles = fileProto.options.javaMultipleFiles || target == GeneratorTarget.WIRE
 
         val outerClassName = if (fileProto.options.hasJavaOuterClassname()) {
             fileProto.options.javaOuterClassname
@@ -38,6 +38,15 @@ object CodeGenerator {
             else -> FileSyntax.PROTO3
         }
 
+        val wireSchema = if (target == GeneratorTarget.WIRE) {
+            if (fileSyntax == FileSyntax.EDITIONS) {
+                throw PluginOptionException("target=wire does not support editions files (${fileProto.name})")
+            }
+            WireSchema(fileProto.`package`, knownTypes, wireOptions.boxOneOfsMinSize)
+        } else {
+            null
+        }
+
         for (messageProto in fileProto.messageTypeList) {
             generateForMessage(
                 messageProto = messageProto,
@@ -48,7 +57,8 @@ object CodeGenerator {
                 validatedTypes = validatedTypes,
                 extractor = extractor,
                 results = results,
-                fileSyntax = fileSyntax
+                fileSyntax = fileSyntax,
+                wireSchema = wireSchema,
             )
         }
 
@@ -64,7 +74,8 @@ object CodeGenerator {
         validatedTypes: Map<String, String>,
         extractor: RuleExtractor,
         results: MutableList<CodeGeneratorResponse.File>,
-        fileSyntax: FileSyntax
+        fileSyntax: FileSyntax,
+        wireSchema: WireSchema? = null,
     ) {
         // Check disabled / ignored
         if (messageProto.options != null) {
@@ -189,7 +200,8 @@ object CodeGenerator {
                             validatedTypes = validatedTypes,
                             fileSyntax = fileSyntax,
                             oneofIgnoreEmptySkipsZeroValue = extractor.oneofIgnoreEmptySkipsZeroValue,
-                            oneofRequiredAssertsActiveCase = extractor.oneofRequiredAssertsActiveCase
+                            oneofRequiredAssertsActiveCase = extractor.oneofRequiredAssertsActiveCase,
+                            wireSchema = wireSchema,
                         )
                     }
                 }
@@ -220,7 +232,8 @@ object CodeGenerator {
                 validatedTypes = validatedTypes,
                 extractor = extractor,
                 results = results,
-                fileSyntax = fileSyntax
+                fileSyntax = fileSyntax,
+                wireSchema = wireSchema,
             )
         }
     }
@@ -268,7 +281,8 @@ object CodeGenerator {
         validatedTypes: Map<String, String>,
         fileSyntax: FileSyntax,
         oneofIgnoreEmptySkipsZeroValue: Boolean = false,
-        oneofRequiredAssertsActiveCase: Boolean = true
+        oneofRequiredAssertsActiveCase: Boolean = true,
+        wireSchema: WireSchema? = null,
     ): String {
         // Build the fully-qualified receiver type
         val receiverType = buildReceiverType(
@@ -277,6 +291,12 @@ object CodeGenerator {
             parentNames = parentNames,
             messageName = messageProto.name
         )
+
+        val style: AccessorStyle = if (wireSchema != null) {
+            WireAccessors(messageProto, fileSyntax, wireSchema, receiverType)
+        } else {
+            JavaAccessors
+        }
 
         // Build a lookup map: field name → FieldDescriptorProto for presence checks
         val fieldByName = messageProto.fieldList.associateBy { it.name }
@@ -297,7 +317,8 @@ object CodeGenerator {
             validatedTypes = validatedTypes,
             neededImports = neededImports,
             fileSyntax = fileSyntax,
-            nestedTypes = messageProto.nestedTypeList
+            nestedTypes = messageProto.nestedTypeList,
+            style = style
         )
 
         bodySb.appendLine("fun $receiverType.validate(): ValidationResult {")
@@ -322,17 +343,16 @@ object CodeGenerator {
         }
 
         // Emit oneof required checks (native proto oneof)
-        for ((_, oneof) in requiredOneofs) {
-            val oneofCaseName = snakeToCamel(oneof.name) + "Case"
-            val notSetValue = oneof.name.replace("_", "").uppercase() + "_NOT_SET"
-            bodySb.appendLine("    if (${snakeToCamelLower(oneof.name)}Case == $receiverType.$oneofCaseName.$notSetValue) {")
+        for ((oneofIndex, oneof) in requiredOneofs) {
+            val members = messageProto.fieldList.filter { it.hasOneofIndex() && it.oneofIndex == oneofIndex }
+            bodySb.appendLine("    if (${style.oneofNotSet(receiverType, oneof.name, members)}) {")
             bodySb.appendLine("        violations += FieldViolation(\"${oneof.name}\", \"required\", \"exactly one field is required in oneof\")")
             bodySb.appendLine("    }")
         }
 
         // Emit message.oneof checks
         for ((oneofIndex, oneofRule) in messageOneofRules.withIndex()) {
-            emitMessageOneofCheck(oneofRule, oneofIndex, fieldByName, fileSyntax, bodySb)
+            emitMessageOneofCheck(oneofRule, oneofIndex, fieldByName, fileSyntax, bodySb, style)
         }
 
         // Build oneof index → name map for guarding field validation.
@@ -366,9 +386,7 @@ object CodeGenerator {
             if (field.hasOneofIndex() && field.oneofIndex in realOneofIndices) {
                 val oneofName = oneofNames[field.oneofIndex]
                 if (oneofName != null) {
-                    val caseAccessor = "${snakeToCamelLower(oneofName)}Case"
-                    val caseEnum = "$receiverType.${snakeToCamel(oneofName)}Case"
-                    val caseValue = field.name.uppercase()
+                    val isActiveCase = style.oneofCaseIs(receiverType, oneofName, field)
 
                     // Buf validate: `required` on a oneof member uses `has` semantics, so
                     // the check goes OUTSIDE the case guard — a member that is not the active
@@ -383,7 +401,7 @@ object CodeGenerator {
                     } else if (rules.message?.required == true && oneofRequiredAssertsActiveCase) {
                         val quotedField = "\"${field.name}\""
                         // Required = this field must be the active case
-                        bodySb.appendLine("    Validators.checkRequired($caseAccessor == $caseEnum.$caseValue, $quotedField)?.let { violations += it }")
+                        bodySb.appendLine("    Validators.checkRequired($isActiveCase, $quotedField)?.let { violations += it }")
                         // Everything else — type rules, and recursion into a
                         // message field whose type has its own validator — only
                         // when this field is active. Emit to a scratch buffer
@@ -397,27 +415,29 @@ object CodeGenerator {
                             validatedTypes = validatedTypes,
                             neededImports = oneofImports,
                             fileSyntax = fileSyntax,
-                            nestedTypes = messageProto.nestedTypeList
+                            nestedTypes = messageProto.nestedTypeList,
+                            style = style
                         )
                         // Emit only the remaining rules, skip the required check
                         val rulesWithoutRequired = rules.copy(message = rules.message.copy(required = false))
-                        FieldEmitter.emit(field, rulesWithoutRequired, "", oneofCtx)
+                        FieldEmitter.emit(field, rulesWithoutRequired, oneofCtx)
                         if (oneofSb.isNotBlank()) {
                             neededImports += oneofImports
-                            bodySb.appendLine("    if ($caseAccessor == $caseEnum.$caseValue) {")
+                            bodySb.appendLine("    if ($isActiveCase) {")
                             bodySb.append(oneofSb)
                             bodySb.appendLine("    }")
                         }
                     } else {
                         // Only validate this field when it's the active oneof member
-                        bodySb.appendLine("    if ($caseAccessor == $caseEnum.$caseValue) {")
+                        bodySb.appendLine("    if ($isActiveCase) {")
                         val oneofCtx = EmitContext(
                             sb = bodySb,
                             indent = "        ",
                             validatedTypes = validatedTypes,
                             neededImports = neededImports,
                             fileSyntax = fileSyntax,
-                            nestedTypes = messageProto.nestedTypeList
+                            nestedTypes = messageProto.nestedTypeList,
+                            style = style
                         )
                         // The oneof case guard already ensures the field is the active
                         // member. For buf validate, an explicitly set oneof member is
@@ -426,21 +446,21 @@ object CodeGenerator {
                         val effectiveRules = if (rules.ignore == IgnoreMode.IF_DEFAULT_VALUE && !oneofIgnoreEmptySkipsZeroValue) {
                             rules.copy(ignore = IgnoreMode.UNSPECIFIED)
                         } else rules
-                        FieldEmitter.emit(field, effectiveRules, "", oneofCtx)
+                        FieldEmitter.emit(field, effectiveRules, oneofCtx)
                         bodySb.appendLine("    }")
                     }
                 } else {
                     if (needsImplicitIgnoreWrap) {
-                        emitWithImplicitIgnoreWrap(field, rules, fileSyntax, bodySb, neededImports, validatedTypes, messageProto.nestedTypeList)
+                        emitWithImplicitIgnoreWrap(field, rules, fileSyntax, bodySb, neededImports, validatedTypes, messageProto.nestedTypeList, style)
                     } else {
-                        FieldEmitter.emit(field, rules, "", ctx)
+                        FieldEmitter.emit(field, rules, ctx)
                     }
                 }
             } else {
                 if (needsImplicitIgnoreWrap) {
-                    emitWithImplicitIgnoreWrap(field, rules, fileSyntax, bodySb, neededImports, validatedTypes, messageProto.nestedTypeList)
+                    emitWithImplicitIgnoreWrap(field, rules, fileSyntax, bodySb, neededImports, validatedTypes, messageProto.nestedTypeList, style)
                 } else {
-                    FieldEmitter.emit(field, rules, "", ctx)
+                    FieldEmitter.emit(field, rules, ctx)
                 }
             }
         }
@@ -453,7 +473,7 @@ object CodeGenerator {
             if (field.type != Type.TYPE_MESSAGE && field.type != Type.TYPE_GROUP) continue
             val typeName = field.typeName
             val rawFieldName = field.name
-            val rawAccessor = snakeToCamelLower(field.name).removeSurrounding("`")
+            val accessor = style.field(field)
 
             // Check if this is a map field (repeated message with a synthetic mapEntry type)
             val entryType = messageProto.nestedTypeList.firstOrNull { nested ->
@@ -466,7 +486,7 @@ object CodeGenerator {
                     val valuePkg = validatedTypes[valueField.typeName]
                     if (valuePkg != null) {
                         neededImports.add(valuePkg)
-                        bodySb.appendLine("    for ((mapKey, mapValue) in ${rawAccessor}Map) {")
+                        bodySb.appendLine("    for ((mapKey, mapValue) in ${style.map(accessor)}) {")
                         bodySb.appendLine("        mapValue.validate().let { result ->")
                         bodySb.appendLine("            if (result is ValidationResult.Invalid) {")
                         bodySb.appendLine("                violations += result.violations.map { it.copy(field = \"$rawFieldName[\$mapKey].\${it.field}\") }")
@@ -480,11 +500,10 @@ object CodeGenerator {
 
             val targetPkg = validatedTypes[typeName] ?: continue
 
-            val fieldName = escapeIfKeyword(snakeToCamelLower(field.name))
             neededImports.add(targetPkg)
 
             if (field.label == Label.LABEL_REPEATED) {
-                bodySb.appendLine("    for ((index, item) in ${rawAccessor}List.withIndex()) {")
+                bodySb.appendLine("    for ((index, item) in ${style.list(accessor)}.withIndex()) {")
                 bodySb.appendLine("        item.validate().let { result ->")
                 bodySb.appendLine("            if (result is ValidationResult.Invalid) {")
                 bodySb.appendLine("                violations += result.violations.map { it.copy(field = \"$rawFieldName[\$index].\${it.field}\") }")
@@ -492,9 +511,8 @@ object CodeGenerator {
                 bodySb.appendLine("        }")
                 bodySb.appendLine("    }")
             } else {
-                val hasAccessor = "has${snakeToCamel(field.name)}()"
-                bodySb.appendLine("    if ($hasAccessor) {")
-                bodySb.appendLine("        $fieldName.validate().let { result ->")
+                bodySb.appendLine("    if (${style.has(field)}) {")
+                bodySb.appendLine("        $accessor.validate().let { result ->")
                 bodySb.appendLine("            if (result is ValidationResult.Invalid) {")
                 bodySb.appendLine("                violations += result.violations.map { it.copy(field = if (it.field.isEmpty()) \"$rawFieldName\" else \"$rawFieldName.\${it.field}\") }")
                 bodySb.appendLine("            }")
@@ -539,9 +557,25 @@ object CodeGenerator {
         bodySb.appendLine("}")
         bodySb.appendLine()
 
+        if (style is WireAccessors) {
+            // Bind each nullable field the body reads, right after `violations`.
+            val bindings = style.bindings(bodySb.toString())
+            if (bindings.isNotEmpty()) {
+                val anchor = "    val violations = mutableListOf<FieldViolation>()\n"
+                val at = bodySb.indexOf(anchor) + anchor.length
+                bodySb.insert(at, bindings.joinToString("") { "    $it\n" })
+            }
+        }
+
         // Now build the full file with imports
         val sb = StringBuilder()
         sb.appendLine("// Generated by protoc-gen-validate-kt. DO NOT EDIT.")
+        if (style is WireAccessors) {
+            // A oneof member is null-checked by its case guard and again by its
+            // own presence guard; the inner check is redundant, not wrong.
+            sb.appendLine("@file:Suppress(\"SENSELESS_COMPARISON\")")
+            sb.appendLine()
+        }
         sb.appendLine("package $javaPackage")
         sb.appendLine()
         sb.appendLine("import dev.bmcreations.protovalidate.FieldViolation")
@@ -578,7 +612,8 @@ object CodeGenerator {
         ruleIndex: Int,
         fieldByName: Map<String, FieldDescriptorProto>,
         fileSyntax: FileSyntax,
-        sb: StringBuilder
+        sb: StringBuilder,
+        style: AccessorStyle
     ) {
         val fieldNames = rule.fields
         val required = rule.required
@@ -587,7 +622,7 @@ object CodeGenerator {
         // e.g. "strField.isNotEmpty()" for a proto3 string, "hasMsgField()" for a message field
         val setExprs = fieldNames.map { name ->
             val field = fieldByName[name]!! // validated to exist
-            fieldSetExpression(field, fileSyntax)
+            fieldSetExpression(field, fileSyntax, style)
         }
 
         // Compute the count of set fields using a val.
@@ -618,17 +653,16 @@ object CodeGenerator {
      * (i.e., not the zero/default value for implicit-presence fields, or has*() for
      * explicit-presence fields).
      */
-    private fun fieldSetExpression(field: FieldDescriptorProto, fileSyntax: FileSyntax): String {
-        val accessor = escapeIfKeyword(snakeToCamelLower(field.name))
-        val rawAccessor = snakeToCamelLower(field.name).removeSurrounding("`")
+    private fun fieldSetExpression(field: FieldDescriptorProto, fileSyntax: FileSyntax, style: AccessorStyle): String {
+        val accessor = style.field(field)
 
         if (field.label == Label.LABEL_REPEATED) {
-            return "${rawAccessor}List.isNotEmpty()"
+            return "${style.list(accessor)}.isNotEmpty()"
         }
 
         // Message fields always have explicit presence
         if (field.type == Type.TYPE_MESSAGE || field.type == Type.TYPE_GROUP) {
-            return "has${snakeToCamel(field.name)}()"
+            return style.has(field)
         }
 
         // For explicit-presence fields (proto2 all scalars, proto3 optional, editions explicit)
@@ -646,13 +680,13 @@ object CodeGenerator {
         }
 
         if (hasPresence) {
-            return "has${snakeToCamel(field.name)}()"
+            return style.has(field)
         }
 
         // Proto3 implicit-presence scalar: "set" means not the zero value
         return when (field.type) {
             Type.TYPE_STRING -> "$accessor.isNotEmpty()"
-            Type.TYPE_BYTES -> "!${rawAccessor}.isEmpty"
+            Type.TYPE_BYTES -> style.bytesNotEmpty(accessor)
             Type.TYPE_BOOL -> accessor
             Type.TYPE_INT32, Type.TYPE_SINT32, Type.TYPE_SFIXED32 -> "$accessor != 0"
             Type.TYPE_INT64, Type.TYPE_SINT64, Type.TYPE_SFIXED64 -> "$accessor != 0L"
@@ -660,7 +694,7 @@ object CodeGenerator {
             Type.TYPE_UINT64, Type.TYPE_FIXED64 -> "$accessor != 0L"
             Type.TYPE_FLOAT -> "$accessor != 0.0f"
             Type.TYPE_DOUBLE -> "$accessor != 0.0"
-            Type.TYPE_ENUM -> "${rawAccessor}Value != 0"
+            Type.TYPE_ENUM -> "${style.fieldEnumNumber(accessor)} != 0"
             else -> "true" // unknown: assume set
         }
     }
@@ -678,9 +712,10 @@ object CodeGenerator {
         bodySb: StringBuilder,
         neededImports: MutableSet<String>,
         validatedTypes: Map<String, String>,
-        nestedTypes: List<DescriptorProto> = emptyList()
+        nestedTypes: List<DescriptorProto> = emptyList(),
+        style: AccessorStyle = JavaAccessors
     ) {
-        val setExpr = fieldSetExpression(field, fileSyntax)
+        val setExpr = fieldSetExpression(field, fileSyntax, style)
         bodySb.appendLine("    if ($setExpr) {")
         val innerCtx = EmitContext(
             sb = bodySb,
@@ -688,7 +723,8 @@ object CodeGenerator {
             validatedTypes = validatedTypes,
             neededImports = neededImports,
             fileSyntax = fileSyntax,
-            nestedTypes = nestedTypes
+            nestedTypes = nestedTypes,
+            style = style
         )
         // Suppress the inner zero-value guard since we're already guarded by setExpr.
         // We do this by replacing UNSPECIFIED ignore with ALWAYS-skip-zero equivalent.
@@ -701,7 +737,7 @@ object CodeGenerator {
         // However the FieldEmitter doesn't know we're already guarded, so for scalar fields with
         // UNSPECIFIED ignore it might not emit a zero guard (which we've already applied).
         // This is fine: the outer guard handles it correctly.
-        FieldEmitter.emit(field, rules, "", innerCtx)
+        FieldEmitter.emit(field, rules, innerCtx)
         bodySb.appendLine("    }")
     }
 
