@@ -105,6 +105,9 @@ private fun ipAddressBytes(ip: String): ByteArray? {
 private fun ipv4Bytes(value: String): ByteArray? {
     if (!isStrictIpv4Bare(value)) return null
     val parts = value.split(".")
+    // isStrictIpv4 lets a sign through ("+1.2.3.4"); InetAddress read those as hostnames
+    // and the prefix check failed, so only plain digits make an address here.
+    if (parts.any { part -> !part.all { it in '0'..'9' } }) return null
     return ByteArray(4) { parts[it].toInt().toByte() }
 }
 

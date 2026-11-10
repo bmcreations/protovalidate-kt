@@ -8,6 +8,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 /**
@@ -103,6 +104,24 @@ class JvmOracleTest {
             compared++
         }
         assertEquals(35, compared) // 10 IPv4 + 25 IPv6 inputs pass the gate
+    }
+
+    @Test
+    fun `signed octets pass the gate but are not network addresses`() {
+        // isStrictIpv4 accepts a leading sign through toIntOrNull. InetAddress does not parse
+        // these as literals (it tries them as hostnames and fails), so the old prefix check
+        // returned false for every prefix length. The common parser must agree.
+        for (ip in listOf("+10.0.0.0", "-0.0.0.0", "+1.2.3.0", "1.+2.3.4", "::ffff:+1.2.3.4", "::+1.2.3.4")) {
+            val v4 = StringValidators.isStrictIpv4(ip)
+            val maxLen = if (v4) 32 else 128
+            assertNull(commonBytes(ip), ip)
+            for (len in listOf(0, 8, maxLen)) {
+                assertFalse(oracleIsNetworkAddress(ip, len, maxLen), "$ip/$len oracle")
+                assertFalse(StringValidators.isValidIpPrefix("$ip/$len", 0, strict = true), "$ip/$len")
+                val versioned = if (v4) StringValidators.checkIpv4Prefix("$ip/$len", "f") else StringValidators.checkIpv6Prefix("$ip/$len", "f")
+                assertNotNull(versioned, "$ip/$len")
+            }
+        }
     }
 
     @Test
