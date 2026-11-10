@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+// (wire.wire_package) moves Wire's classes out of java_package, so the
+// validators must follow them there.
+
+package golden.wirepkg;
+
+option java_package = "golden.java_pkg";
+option java_multiple_files = true;
+option (wire.wire_package) = "golden.wire_pkg";
+
+import "validate/validate.proto";
+import "wire/extensions.proto";
+
+message Tagged {
+    string tag = 1 [(validate.rules).string.min_len = 1];
+}

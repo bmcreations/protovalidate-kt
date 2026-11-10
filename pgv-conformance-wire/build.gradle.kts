@@ -14,17 +14,41 @@ plugins {
 }
 
 val harnessProtos = rootProject.file("pgv-conformance/src/main/proto")
-// golden/*.proto: the plugin's golden fixtures, compiled here against real Wire
-// output (the golden test only compares text).
+// golden/**/*.proto: the plugin's golden fixtures, compiled here against real
+// Wire output (the golden test only compares text).
 val goldenProtos = rootProject.file("protoc-plugin/src/test/proto")
 val validateProtos = rootProject.file("protos")
+
+// -PwireBoxOneOfsMinSize=N runs the harness with Wire's boxOneOfsMinSize = N,
+// for both the Wire classes and the validators. The golden fixtures keep their
+// own options whatever it is set to.
+val harnessBoxOneOfsMinSize: Int? = providers.gradleProperty("wireBoxOneOfsMinSize").orNull?.let {
+    requireNotNull(it.toIntOrNull()?.takeIf { n -> n > 0 }) {
+        "wireBoxOneOfsMinSize must be a positive integer, got '$it'"
+    }
+}
+// golden/boxed/ is generated with this in the golden test too.
+val goldenBoxOneOfsMinSize = 2
 
 wire {
     sourcePath { srcDir(harnessProtos) }
     sourcePath { srcDir(goldenProtos) }
     protoPath { srcDir(validateProtos) }
+    // Targets claim types in order, so each later one gets what is left.
+    // Flipcash's planned Wire config: option annotations off, otherwise defaults.
     kotlin {
-        // Flipcash's planned Wire config: option annotations off, otherwise defaults.
+        includes = listOf("golden.boxed.*")
+        boxOneOfsMinSize = goldenBoxOneOfsMinSize
+        emitAppliedOptions = false
+        emitDeclaredOptions = false
+    }
+    kotlin {
+        includes = listOf("golden.*")
+        emitAppliedOptions = false
+        emitDeclaredOptions = false
+    }
+    kotlin {
+        harnessBoxOneOfsMinSize?.let { boxOneOfsMinSize = it }
         emitAppliedOptions = false
         emitDeclaredOptions = false
     }
@@ -42,9 +66,11 @@ val protobufVersion = libs.versions.protobuf.get()
 
 val protoc by configurations.creating { isTransitive = false }
 val protobufJava by configurations.creating { isTransitive = false }
+val wireSchema by configurations.creating { isTransitive = false }
 dependencies {
     protoc("com.google.protobuf:protoc:$protobufVersion:$protocClassifier@exe")
     protobufJava(libs.protobuf.java)
+    wireSchema("com.squareup.wire:wire-schema-jvm:7.1.2")
 }
 
 // protoc's well-known-type protos (validate.proto imports them).
@@ -53,21 +79,38 @@ val extractWellKnownProtos by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("wkt-protos"))
 }
 
-val validatorsDir = layout.buildDirectory.dir("generated/validate-kt-wire")
+// wire/extensions.proto, which the wire_package fixture imports. Wire resolves
+// it by itself; protoc needs it on the include path.
+val extractWireProtos by tasks.registering(Sync::class) {
+    from({ wireSchema.map { zipTree(it) } }) { include("wire/extensions.proto") }
+    into(layout.buildDirectory.dir("wire-protos"))
+}
 
-val generateWireValidators by tasks.registering(Exec::class) {
-    dependsOn(":protoc-plugin:jar", extractWellKnownProtos)
+val validatorsRoot = layout.buildDirectory.dir("generated/validate-kt-wire")
+
+/**
+ * Generates validators for [protos] (paths under [root]) with target=wire and
+ * [boxOneOfsMinSize], into their own directory under [validatorsRoot].
+ */
+fun registerValidatorGeneration(
+    name: String,
+    root: File,
+    include: String,
+    boxOneOfsMinSize: Int?,
+) = tasks.register<Exec>(name) {
+    dependsOn(":protoc-plugin:jar", extractWellKnownProtos, extractWireProtos)
     val pluginScript = rootProject.file("protoc-plugin/protoc-gen-validate-kt")
     val pluginJar = rootProject.file("protoc-plugin/build/libs/protoc-plugin.jar")
     val wkt = layout.buildDirectory.dir("wkt-protos").get().asFile
-    val out = validatorsDir.get().asFile
-    val sources = files(
-        fileTree(harnessProtos) { include("**/*.proto") },
-        fileTree(goldenProtos) { include("golden/*.proto") },
-    )
+    val wireProtos = layout.buildDirectory.dir("wire-protos").get().asFile
+    val out = validatorsRoot.get().dir(name).asFile
+    val sources = fileTree(root) { include(include) }
+    val parameter = listOfNotNull("target=wire", boxOneOfsMinSize?.let { "wire_box_oneofs_min_size=$it" })
+        .joinToString(",")
     inputs.file(pluginJar).withPropertyName("validateKtPluginJar")
     inputs.files(sources).withPropertyName("protos")
     inputs.files(protoc).withPropertyName("protoc")
+    inputs.property("parameter", parameter)
     outputs.dir(out)
     doFirst {
         out.deleteRecursively()
@@ -76,16 +119,28 @@ val generateWireValidators by tasks.registering(Exec::class) {
         executable = exe.absolutePath
         args(
             "--plugin=protoc-gen-validate-kt=${pluginScript.absolutePath}",
-            "--validate-kt_out=target=wire:${out.absolutePath}",
+            "--validate-kt_out=$parameter:${out.absolutePath}",
             "-I", harnessProtos.absolutePath,
             "-I", goldenProtos.absolutePath,
             "-I", validateProtos.absolutePath,
             "-I", wkt.absolutePath,
+            "-I", wireProtos.absolutePath,
         )
-        args(fileTree(harnessProtos) { include("**/*.proto") }.map { it.relativeTo(harnessProtos).path })
-        args(fileTree(goldenProtos) { include("golden/*.proto") }.map { it.relativeTo(goldenProtos).path })
+        args(sources.map { it.relativeTo(root).path })
     }
 }
+
+val generateWireValidators = registerValidatorGeneration(
+    "generateWireValidators", harnessProtos, "**/*.proto", harnessBoxOneOfsMinSize,
+)
+// Flat fixtures: every golden proto except golden/boxed/.
+val generateGoldenWireValidators = registerValidatorGeneration(
+    "generateGoldenWireValidators", goldenProtos, "golden/*.proto", null,
+)
+val generateBoxedGoldenWireValidators = registerValidatorGeneration(
+    "generateBoxedGoldenWireValidators", goldenProtos, "golden/boxed/**/*.proto", goldenBoxOneOfsMinSize,
+)
+val harnessValidatorsDir = validatorsRoot.map { it.dir("generateWireValidators") }
 
 kotlin {
     jvm()
@@ -98,7 +153,8 @@ kotlin {
 
     sourceSets {
         commonMain {
-            kotlin.srcDir(files(validatorsDir).builtBy(generateWireValidators))
+            listOf(generateWireValidators, generateGoldenWireValidators, generateBoxedGoldenWireValidators)
+                .forEach { task -> kotlin.srcDir(files(validatorsRoot.map { it.dir(task.name) }).builtBy(task)) }
             dependencies {
                 implementation(project(":runtime"))
                 implementation("com.squareup.wire:wire-runtime:7.1.2")
@@ -125,12 +181,11 @@ val executorJar by tasks.registering(Jar::class) {
 // must emit the same validator files for the harness.
 val checkValidatorParity by tasks.registering {
     dependsOn(generateWireValidators, ":pgv-conformance:generateProto")
-    val wireOut = validatorsDir.get().asFile
+    val wireOut = harnessValidatorsDir.get().asFile
     val javaOut = rootProject.file("pgv-conformance/build/generated/sources/proto/main/validate-kt")
     doLast {
         fun list(dir: File) = dir.walkTopDown().filter { it.isFile }
             .map { it.relativeTo(dir).path }
-            .filterNot { it.startsWith("golden/") }
             .toSortedSet()
         val wire = list(wireOut)
         val java = list(javaOut)
